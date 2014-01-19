@@ -9,6 +9,7 @@ def main():
                 #proxy=...,
                 #testnet=True,
                 #peer_goal=20,
+                #relay=False,
     
     try:
         while True:

@@ -7,8 +7,9 @@ import threading
 import time
 import traceback
 
-from .inv import INV
+from .inv import Inv
 from .serialize import Serialize
+from .transaction import Transaction
 from .util import *
 
 DEFAULT_PORT = 8333
@@ -28,6 +29,10 @@ class OutOfPeers(Exception):
 ################################################################################
 ################################################################################
 class MANAGER(threading.Thread):
+    REQUEST_WAIT = 0
+    REQUEST_GO = 1
+    REQUEST_DONT = 2
+
     PEER_RECORD_SIZE = 14
 
     PROTOCOL_VERSION = 60002
@@ -212,9 +217,20 @@ class MANAGER(threading.Thread):
         with self.peer_lock:
             self.add_peer_address(peer_address)
 
+    def will_request_inv(self, inv):
+        return MANAGER.REQUEST_GO
+
+    def received_transaction(self, tx):
+        pass
+
+    def received_block(self, block):
+        pass
+
 ################################################################################
 ################################################################################
 class PEER(threading.Thread):
+    MAX_INVS_IN_PROGRESS = 3
+
     def __init__(self, manager, peer_address):
         threading.Thread.__init__(self)
         self.manager = manager
@@ -251,12 +267,15 @@ class PEER(threading.Thread):
             self.bytes_received = 0
             self.outgoing_data_queue = collections.deque()
             self.peer_verack = 0
+            self.invs = {}
+            self.inprogress_invs = {}
             if self.make_connection():
                 self.send_version()
                 self.state = 'connected'
         elif self.state == 'connected':
             self.handle_outgoing_data()
             self.handle_incoming_data()
+            self.handle_invs()
         elif self.state == 'dead':
             self.running = False
 
@@ -334,6 +353,53 @@ class PEER(threading.Thread):
 
         cmd(payload)
 
+    def handle_invs(self):
+        if len(self.inprogress_invs) >= PEER.MAX_INVS_IN_PROGRESS:
+            # TODO - remove invs that have not gotten any data (we need to distinguish from
+            # not getting any data vs. a large block taking more than x time to download)
+            return
+
+        now = time.time()
+        requests = set()
+        aborts = set()
+
+        for inv, when in self.invs.items():
+            if when > now:
+                # This mechanism allows us to "retry" fetching the item later if one request fails
+                continue
+            
+            # TODO - handle blocks
+            if inv.type == Inv.MSG_BLOCK:
+                aborts.add(inv)
+                continue
+
+            res = self.manager.will_request_inv(inv)
+            if res == MANAGER.REQUEST_GO:
+                assert inv not in self.inprogress_invs
+                requests.add(inv)
+                self.invs[inv] = now + 2 # it'll get retried later if it doesn't get removed below
+            elif res == MANAGER.REQUEST_DONT:
+                aborts.add(inv)
+            elif res == MANAGER.REQUEST_WAIT:
+                self.invs[inv] = now + 5
+
+            if len(requests) + len(self.inprogress_invs) >= PEER.MAX_INVS_IN_PROGRESS:
+                break
+
+        for inv in aborts:
+            self.invs.pop(inv)
+
+        for inv in self.request_invs(requests):
+            self.invs.pop(inv)
+
+    def request_invs(self, invs):
+        if len(invs) != 0:
+            now = time.time()
+            for inv in invs:
+                self.inprogress_invs[inv] = now
+                yield inv
+            self.send_getdata(invs)
+
     def send_version(self):
         version  = MANAGER.PROTOCOL_VERSION
         services = MANAGER.SERVICES
@@ -352,6 +418,16 @@ class PEER(threading.Thread):
     def send_verack(self):
         self.queue_outgoing_data(Serialize.wrap_network_message("verack", b''))
 
+    def send_getdata(self, invs):
+        data = []
+        for inv in invs:
+            data.append(inv.serialize())
+
+        payload = Serialize.serialize_variable_int(len(data)) + b''.join(data)
+        self.queue_outgoing_data(Serialize.wrap_network_message("getdata", payload))
+        if self.manager.logging_level <= DEBUG:
+            print("[PEER] {} sent getdata for {} items".format(self.peer_address, len(invs)))
+
     def cmd_version(self, payload):
         if len(payload) < 20:
             if self.manager.logging_level <= WARNING:
@@ -359,12 +435,20 @@ class PEER(threading.Thread):
             self.state = 'dead'
             return
 
-        self.peer_version, self.peer_services, _ = struct.unpack("<LQQ", payload[:20])
-        _, _, payload = Serialize.unserialize_network_address(payload[20:], with_timestamp=False)
-        _, _, payload = Serialize.unserialize_network_address(payload, with_timestamp=False)
-        nonce = struct.unpack("<Q", payload[:8])[0]
-        self.peer_user_agent, payload = Serialize.unserialize_string(payload[8:])
-        self.peer_last_block = struct.unpack("<L", payload)[0]
+        try:
+            self.peer_version, self.peer_services, _ = struct.unpack("<LQQ", payload[:20])
+            _, _, payload = Serialize.unserialize_network_address(payload[20:], with_timestamp=False)
+            _, _, payload = Serialize.unserialize_network_address(payload, with_timestamp=False)
+            nonce = struct.unpack("<Q", payload[:8])[0]
+            self.peer_user_agent, payload = Serialize.unserialize_string(payload[8:])
+            self.peer_last_block = struct.unpack("<L", payload)[0]
+        except struct.error:
+            # Not enough data usually
+            self.state = 'dead'
+            self.manager.peer_is_bad(self.peer_address)
+            if self.manager.logging_level <= DEBUG:
+                print("[PEER] {} bad version.".format(self.peer_address))
+            return
 
         if self.manager.logging_level <= INFO:
             print("[PEER] {} version {} (User-agent {}, last block {})".format(self.peer_address, self.peer_version, self.peer_user_agent, self.peer_last_block))
@@ -381,31 +465,42 @@ class PEER(threading.Thread):
             addr, _, _, payload = Serialize.unserialize_network_address(payload, with_timestamp=self.peer_version >= 31402)
             self.manager.peer_found(addr)
 
-
     def cmd_inv(self, payload):
         count, payload = Serialize.unserialize_variable_int(payload)
 
         for i in range(count):
-            inv, payload = INV.unserialize(payload)
+            inv, payload = Inv.unserialize(payload)
 
-            if inv.type == INV.MSG_ERROR:
-                continue
+            if inv.type == Inv.MSG_ERROR:
+                if self.manager.logging_level <= INFO:
+                    print('[PEER] {} inv error {}'.format(self.peer_address, bytes_to_hexstring(inv.hash)))
 
-            elif inv.type == INV.MSG_TX:
+            elif inv.type == Inv.MSG_TX:
                 if self.manager.logging_level <= INFO:
                     print('[PEER] {} inv tx {}'.format(self.peer_address, bytes_to_hexstring(inv.hash)))
-                #!self.invs.add((inv, time.time()))
-                pass
 
-            elif inv.type == INV.MSG_BLOCK:
+            elif inv.type == Inv.MSG_BLOCK:
                 if self.manager.logging_level <= INFO:
                     print('[PEER] {} inv block {}'.format(self.peer_address, bytes_to_hexstring(inv.hash)))
                 #!key = (inv, time.time())
-                #!self.invs.add(key)
                 #!self.known_blocks_order[self.known_blocks_order_index] = key
                 #!self.known_blocks_order_index += 1
+
+            if inv not in self.invs and inv not in self.inprogress_invs:
+                self.invs[inv] = time.time()
 
         # We can reset the getblocks if we have gotten a response...
         #! if len(self.known_blocks) >= 50:
         #!     self.last_get_blocks_time = 0
+
+    def cmd_tx(self, payload):
+        tx, _ = Transaction.unserialize(payload)
+        tx_hash = tx.hash()
+        inv = Inv(Inv.MSG_TX, tx_hash)
+        if inv in self.inprogress_invs:
+            print(str(tx))
+            self.manager.received_transaction(tx)
+            self.inprogress_invs.pop(inv)
+        else:
+            raise Exception("peer sent a tx without us asking it to")
 
