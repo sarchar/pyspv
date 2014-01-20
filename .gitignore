@@ -9,4 +9,3 @@ syntax: glob
 __pycache__
 .hg
 .hgignore
-addresses.dat

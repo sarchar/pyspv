@@ -2,8 +2,12 @@ import pyspv
 import time
 import traceback
 
+def on_tx(tx):
+    print(str(tx))
+    return pyspv.IGNORE_TRANSACTION #pyspv.SAVE_TRANSACTION
+
 def main():
-    spv = pyspv.pyspv(logging_level=pyspv.DEBUG)
+    spv = pyspv.pyspv('pyspv_test1', logging_level=pyspv.DEBUG)
                 #listen=('0.0.0.0', 8334),
                 #listen=None,
                 #proxy=...,
