@@ -40,7 +40,7 @@ class pyspv:
         self.testnet = testnet
         self.logging_level = logging_level
 
-        self.callbacks = pyspv.callbacks(on_tx=self.on_tx if on_tx is None else on_tx)
+        self.callbacks = pyspv.callbacks(on_tx=on_tx)
         self.config = pyspv.config(app_name, testnet=testnet)
 
         if self.logging_level <= INFO:
@@ -48,6 +48,7 @@ class pyspv:
 
         self.wallet = wallet.Wallet(spv=self)
         self.wallet.register_payments(SimplePayments(spv=self))
+        self.wallet.load_wallet()
 
         self.txdb = txdb.TransactionDatabase(spv=self)
 
@@ -61,6 +62,11 @@ class pyspv:
         self.network_manager.join()
 
     def on_tx(self, tx):
-        #self.txdb.save_tx(tx)
-        pass
+        r = False
+
+        if self.callbacks is not None and self.callbacks.on_tx is not None:
+            r = self.callbacks.on_tx(tx)
+
+        if not r:
+            self.wallet.on_tx(tx)
 

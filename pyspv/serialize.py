@@ -71,6 +71,44 @@ class Serialize:
         return s, data[length:]
 
     @staticmethod
+    def serialize_object(o):
+        if isinstance(o, int):
+            return b'v' + Serialize.serialize_variable_int(o)
+        elif isinstance(o, str):
+            return b's' + Serialize.serialize_string(o)
+        elif isinstance(o, dict):
+            return b'd' + Serialize.serialize_dict(o)
+
+    @staticmethod
+    def unserialize_object(data):
+        t = bytes([data[0]])
+        if t == b'v':
+            return Serialize.unserialize_variable_int(data[1:])
+        elif t == b's':
+            return Serialize.unserialize_string(data[1:])
+        elif t == b'd':
+            return Serialize.unserialize_dict(data[1:])
+
+    @staticmethod
+    def serialize_dict(d):
+        count = Serialize.serialize_variable_int(len(d.keys()))
+        r = []
+        for k in d.keys():
+            r.append(Serialize.serialize_object(k))
+            r.append(Serialize.serialize_object(d[k]))
+        return count + b''.join(r)
+
+    @staticmethod
+    def unserialize_dict(data):
+        count, data = Serialize.unserialize_variable_int(data)
+        r = {}
+        for _ in range(count):
+            k, data = Serialize.unserialize_object(data)
+            v, data = Serialize.unserialize_object(data)
+            r[k] = v
+        return r, data
+
+    @staticmethod
     def serialize_network_address(address, services, with_timestamp=True):
         if address is not None:
             quads   = address[0].split(".")

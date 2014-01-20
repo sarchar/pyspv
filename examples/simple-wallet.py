@@ -3,8 +3,7 @@ import time
 import traceback
 
 def on_tx(tx):
-    print(str(tx))
-    return pyspv.IGNORE_TRANSACTION #pyspv.SAVE_TRANSACTION
+    return False
 
 def main():
     spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=2)
@@ -14,7 +13,10 @@ def main():
                 #testnet=True,
                 #peer_goal=20,
                 #relay=False,
-    
+ 
+    if len(list(spv.wallet.private_keys())) == 0:
+        spv.wallet.create_new_private_key()
+
     try:
         while True:
             time.sleep(1)

@@ -251,9 +251,7 @@ class Manager(threading.Thread):
 
     def received_transaction(self, inv, tx):
         self.tx_bloom_filter.add(inv.hash)
-
-        if self.callbacks is not None and self.callbacks.on_tx is not None:
-            self.callbacks.on_tx(tx)
+        self.spv.on_tx(tx)
 
         # Do this after adding the tx to the wallet to handle race condition
         with self.inv_lock:
@@ -266,7 +264,7 @@ class Manager(threading.Thread):
 ################################################################################
 ################################################################################
 class Peer(threading.Thread):
-    MAX_INVS_IN_PROGRESS = 3
+    MAX_INVS_IN_PROGRESS = 10
 
     def __init__(self, manager, peer_address):
         threading.Thread.__init__(self)
