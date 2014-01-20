@@ -7,7 +7,7 @@ def on_tx(tx):
     return pyspv.IGNORE_TRANSACTION #pyspv.SAVE_TRANSACTION
 
 def main():
-    spv = pyspv.pyspv('pyspv_test1', logging_level=pyspv.DEBUG)
+    spv = pyspv.pyspv('pyspv_test1', logging_level=pyspv.DEBUG, peer_goal=2)
                 #listen=('0.0.0.0', 8334),
                 #listen=None,
                 #proxy=...,

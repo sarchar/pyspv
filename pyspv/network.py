@@ -7,6 +7,7 @@ import threading
 import time
 import traceback
 
+from .bloom import Bloom
 from .inv import Inv
 from .serialize import Serialize
 from .transaction import Transaction
@@ -52,6 +53,8 @@ class Manager(threading.Thread):
 
         self.inv_lock = threading.Lock()
         self.inprogress_invs = {}
+
+        self.tx_bloom_filter = Bloom(hash_count=32, size=2**23) # Use 8MB for our tx bloom filter
 
     def start(self):
         self.running = False
@@ -238,18 +241,19 @@ class Manager(threading.Thread):
                 return Manager.REQUEST_WAIT
 
             if self.spv.txdb.has_tx(inv.hash):
-                print("[NETWORK] already have {}".format(bytes_to_hexstring(inv.hash)))
                 return Manager.REQUEST_DONT
 
-            # TODO if self.tx_bloom_filter.matches(inv.hash):
-            # TODO     return Manager.REQUEST_DONT
+            if self.tx_bloom_filter.has(inv.hash):
+                return Manager.REQUEST_DONT
 
             self.inprogress_invs[inv] = time.time()
             return Manager.REQUEST_GO
 
     def received_transaction(self, inv, tx):
+        self.tx_bloom_filter.add(inv.hash)
+
         if self.callbacks is not None and self.callbacks.on_tx is not None:
-            r = self.callbacks.on_tx(tx)
+            self.callbacks.on_tx(tx)
 
         # Do this after adding the tx to the wallet to handle race condition
         with self.inv_lock:

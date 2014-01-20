@@ -4,7 +4,9 @@ from . import network
 from . import txdb
 from . import wallet
 
+from .bitcoin import *
 from .util import *
+from .payments.simple import SimplePayments
 
 class pyspv:
     class config:
@@ -33,11 +35,8 @@ class pyspv:
         def __init__(self, on_tx=None):
             self.on_tx = on_tx
 
-    def on_tx(self, tx):
-        print('saving transaction', str(tx))
-        self.txdb.save_tx(tx)
-
-    def __init__(self, app_name, testnet=False, logging_level=WARNING, on_tx=None):
+    def __init__(self, app_name, testnet=False, peer_goal=8, logging_level=WARNING, on_tx=None):
+        self.coin = BitcoinTestnet if testnet else Bitcoin
         self.testnet = testnet
         self.logging_level = logging_level
 
@@ -48,9 +47,11 @@ class pyspv:
             print('[PYSPV] app data at {}'.format(self.config.path))
 
         self.wallet = wallet.Wallet(spv=self)
+        self.wallet.register_payments(SimplePayments(spv=self))
+
         self.txdb = txdb.TransactionDatabase(spv=self)
 
-        self.network_manager = network.Manager(spv=self, callbacks=self.callbacks)
+        self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, callbacks=self.callbacks)
         self.network_manager.start()
 
     def shutdown(self):
@@ -58,3 +59,8 @@ class pyspv:
     
     def join(self):
         self.network_manager.join()
+
+    def on_tx(self, tx):
+        #self.txdb.save_tx(tx)
+        pass
+
