@@ -37,3 +37,28 @@ def base58_check(coin, src, version_bytes=0):
         return ('1' * lz) + e
     return e
 
+def bits_to_target(bits):
+    r = bits & 0x007FFFFF
+    mant = ( bits >> 24 ) & 0xFF
+    neg = -1 if ( bits & 0x00800000 ) != 0 else 1
+
+    if mant <= 3:
+        return neg * (r >> (8 * (3 - mant)))
+    else:
+        return neg * (r << (8 * (mant - 3)))
+
+def target_to_bits(target):
+    v = []
+    while target != 0:
+        v.append(target % 256)
+        target //= 256
+
+    if v[-1] > 0x7f:
+        v.append(0)
+
+    m = len(v)
+    while len(v) < 3:
+        v = [0] + v
+
+    return (m << 24) | (v[-1] << 16) | (v[-2] << 8) | v[-3]
+

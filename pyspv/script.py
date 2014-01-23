@@ -41,6 +41,23 @@ class Script:
     def __init__(self, program=b''):
         self.program = program
 
+    def push_bytes(self, data):
+        assert isinstance(data, bytes)
+
+        if len(data) < int(OP_PUSHDATA1):
+            self.program = self.program + bytes([len(data)])
+        elif len(data) <= 0xff:
+            self.program = self.program + bytes([OP_PUSHDATA1, len(data)])
+        elif len(data) <= 0xffff:
+            self.program = self.program + bytes([OP_PUSHDATA2, len(data) & 0xff, (len(data) >> 8) & 0xff])
+        else:
+            self.program = self.program + bytes([OP_PUSHDATA4, len(data) & 0xff, (len(data) >> 8) & 0xff, (len(data) >> 16) & 0xff, (len(data) >> 24) & 0xff])
+        
+        self.program = self.program + data
+
     def serialize(self):
         return self.program
+
+    def serialize_size(self):
+        return len(self.program)
 

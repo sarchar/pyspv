@@ -9,25 +9,25 @@ from ..script import *
 from ..util import *
 
 class SimpleCoins(Coins):
-    def __init__(self, amount, address, prevout, scriptPubKey, watch):
+    def __init__(self, amount, address, prevout, script, watch):
         Coins.__init__(self, amount)
 
         self.prevout = prevout
-        self.scriptPubKey = scriptPubKey
+        self.script = script
         self.address = address
         self.watch = watch
 
     def destination_name(self):
         return self.address
 
-    def produce_inputs(self, tx, sign_flags):
+    def add_inputs(self, tx, sign_flags):
         # TODO
         return []
 
     def serialize(self):
         return Serialize.serialize_variable_int(self.amount) + \
                self.prevout.serialize() + Serialize.serialize_string(self.address) + \
-               struct.pack('<L', len(self.scriptPubKey)) + self.scriptPubKey + \
+               struct.pack('<L', len(self.script)) + self.script + \
                Serialize.serialize_dict(self.watch)
 
     @staticmethod
@@ -36,12 +36,12 @@ class SimpleCoins(Coins):
         prevout, data = TransactionPrevOut.unserialize(data)
         address, data = Serialize.unserialize_string(data)
 
-        scriptPubKeyLength = struct.unpack("<L", data[:4])[0]
-        scriptPubKey = data[4:4+scriptPubKeyLength]
+        script_length = struct.unpack("<L", data[:4])[0]
+        script = data[4:4+script_length]
 
-        watch, data = Serialize.unserialize_dict(data[4+scriptPubKeyLength:])
+        watch, data = Serialize.unserialize_dict(data[4+script_length:])
 
-        coins = SimpleCoins(amount, address, prevout, scriptPubKey, watch)
+        coins = SimpleCoins(amount, address, prevout, script, watch)
         return coins, data
 
 class SimplePayments(BasePayments):
@@ -77,15 +77,15 @@ class SimplePayments(BasePayments):
 
     def on_tx(self, tx):
         for i, output in enumerate(tx.outputs):
-            scriptPubKey = output.scriptPubKey.program
+            script = output.script.program
 
-            if len(scriptPubKey) == 25 and scriptPubKey[0] == OP_DUP \
-                         and scriptPubKey[1] == OP_HASH160 and scriptPubKey[2] == 20 \
-                         and scriptPubKey[23] == OP_EQUALVERIFY and scriptPubKey[24] == OP_CHECKSIG:
-                address = base58_check(self.spv.coin, scriptPubKey[3:23], version_bytes=self.spv.coin.ADDRESS_VERSION_BYTES)
-            elif len(scriptPubKey) in (35, 67) and scriptPubKey[0] in (33, 65) and \
-                         scriptPubKey[0] == (len(scriptPubKey) - 2) and scriptPubKey[-1] == OP_CHECKSIG:
-                address = base58_check(self.spv.coin, self.spv.coin.hash160(scriptPubKey[1:-1]), version_bytes=self.spv.coin.ADDRESS_VERSION_BYTES)
+            if len(script) == 25 and script[0] == OP_DUP \
+                         and script[1] == OP_HASH160 and script[2] == 20 \
+                         and script[23] == OP_EQUALVERIFY and script[24] == OP_CHECKSIG:
+                address = base58_check(self.spv.coin, script[3:23], version_bytes=self.spv.coin.ADDRESS_VERSION_BYTES)
+            elif len(script) in (35, 67) and script[0] in (33, 65) and \
+                         script[0] == (len(script) - 2) and script[-1] == OP_CHECKSIG:
+                address = base58_check(self.spv.coin, self.spv.coin.hash160(script[1:-1]), version_bytes=self.spv.coin.ADDRESS_VERSION_BYTES)
             else:
                 # Not simple payment
                 continue
@@ -96,7 +96,7 @@ class SimplePayments(BasePayments):
                     print('[SIMPLEPAYMENTS] payment of {} to {} received'.format(output.amount, address))
 
                 prevout = TransactionPrevOut(tx.hash(), i)
-                coins = SimpleCoins(output.amount, address, prevout, scriptPubKey, watch)
+                coins = SimpleCoins(output.amount, address, prevout, script, watch)
                 self.spv.wallet.add_coins(self, coins)
 
         # TODO - check inputs, they might spend coins from the wallet

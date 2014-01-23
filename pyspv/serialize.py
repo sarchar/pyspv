@@ -16,8 +16,6 @@ class MessageChecksumFailure(Exception):
     pass
 
 class Serialize:
-    NETWORK_MAGIC = bytes([0xF9, 0xBE, 0xB4, 0xD9]) 
-
     @staticmethod
     def serialize_variable_int(i):
         if i < 0xfd:
@@ -28,15 +26,15 @@ class Serialize:
             return struct.pack("<BL", 0xfe, i)
         return struct.pack("<BQ", 0xff, i)
 
-    # @staticmethod
-    # def serialize_variable_int_size(i):
-    #     if i < 0xfd:
-    #         return 1
-    #     if i <= 0xffff:
-    #         return 3
-    #     if i <= 0xffffffff:
-    #         return 5
-    #     return 9
+    @staticmethod
+    def serialize_variable_int_size(i):
+        if i < 0xfd:
+            return 1
+        if i <= 0xffff:
+            return 3
+        if i <= 0xffffffff:
+            return 5
+        return 9
 
     @staticmethod
     def unserialize_variable_int(data):
@@ -151,8 +149,8 @@ class Serialize:
             return ((address, port), services, data)
 
     @staticmethod
-    def wrap_network_message(command, payload):
-        magic = Serialize.NETWORK_MAGIC
+    def wrap_network_message(coin, command, payload):
+        magic = coin.NETWORK_MAGIC
         command = command[:12].encode("ascii")
         command += bytes([0] * (12 - len(command))) # pad to 12 bytes
         length = struct.pack("<L", len(payload))
@@ -160,12 +158,12 @@ class Serialize:
         return magic + command + length + checksum + payload
 
     @staticmethod
-    def unwrap_network_message(data):
+    def unwrap_network_message(coin, data):
         if len(data) < 24:
             return None, None, data
 
         magic = data[:4]
-        if magic != Serialize.NETWORK_MAGIC:
+        if magic != coin.NETWORK_MAGIC:
             raise InvalidNetworkMagic()
 
         i = 0

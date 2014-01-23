@@ -7,21 +7,14 @@ import threading
 import time
 import traceback
 
+from .block import Block, BlockHeader
 from .bloom import Bloom
 from .inv import Inv
 from .serialize import Serialize
 from .transaction import Transaction
 from .util import *
 
-DEFAULT_PORT = 8333
 
-SEEDS = [
-    'seed.bitcoin.sipa.be',
-    'dnsseed.bluematt.me',
-    'dnsseed.bitcoin.dashjr.org',
-    'bitseed.xf2.org',
-]
- 
 ################################################################################
 ################################################################################
 class OutOfPeers(Exception):
@@ -40,6 +33,11 @@ class Manager(threading.Thread):
     SERVICES = 1
     USER_AGENT = '/Satoshi:0.7.2/'
 
+    BLOCKCHAIN_SYNC_WAIT_TIME = 10
+
+    HEADERS_REQUEST_TIMEOUT   = 25
+    GETBLOCKS_REQUEST_TIMEOUT = 60
+
     def __init__(self, spv=None, callbacks=None, peer_goal=1):
         threading.Thread.__init__(self)
         self.spv = spv
@@ -54,7 +52,12 @@ class Manager(threading.Thread):
         self.inv_lock = threading.Lock()
         self.inprogress_invs = {}
 
+        self.blockchain_sync_lock = threading.Lock()
+
         self.tx_bloom_filter = Bloom(hash_count=32, size=2**23) # Use 8MB for our tx bloom filter
+
+        self.headers_request = None
+        self.headers_request_last_peer = None
 
     def start(self):
         self.running = False
@@ -78,8 +81,10 @@ class Manager(threading.Thread):
 
     def run(self):
         self.running = True
+
         if self.spv.logging_level <= DEBUG:
             print("[NETWORK] starting")
+
         while self.running:
             if len(self.peer_addresses) < 5:
                 self.get_new_addresses_from_peer_sources()
@@ -87,17 +92,24 @@ class Manager(threading.Thread):
             self.check_for_dead_peers()
             self.check_for_new_peers()
 
-            time.sleep(0.001)
+            with self.blockchain_sync_lock:
+                if self.headers_request is not None and (time.time() - self.headers_request['time']) >= Manager.HEADERS_REQUEST_TIMEOUT:
+                    # Misbehaving peer?
+                    self.peer_is_bad(self.headers_request['peer'].peer_address)
+                    self.headers_request['peer'].state = 'dead'
+
+            time.sleep(0.01)
+
         if self.spv.logging_level <= DEBUG:
             print("[NETWORK] stopping")
 
     def get_new_addresses_from_peer_sources(self):
-        for seed in SEEDS:
+        for seed in self.spv.coin.SEEDS:
             for _, _, _, _, ipport in socket.getaddrinfo(seed, None):
                 if len(ipport) != 2: # no IPv6 support yet
                     continue
                 ip, _ = ipport
-                self.add_peer_address((ip, DEFAULT_PORT))
+                self.add_peer_address((ip, self.spv.coin.DEFAULT_PORT))
 
     def add_peer_address(self, peer_address):
         if peer_address in self.peer_addresses:
@@ -185,9 +197,18 @@ class Manager(threading.Thread):
                 continue
             dead_peers.add(peer_address)
 
-        for peer_address in dead_peers:
-            peer = self.peers.pop(peer_address)
+        with self.inv_lock:
+            for peer_address in dead_peers:
+                peer = self.peers.pop(peer_address)
+
+                if self.headers_request is not None and self.headers_request['peer'] is peer:
+                    # We lost a peer who was requesting headers, so let someone else do it.
+                    self.headers_request = None
  
+                for inv in peer.inprogress_invs:
+                    if inv in self.inprogress_invs:
+                        self.inprogress_invs.pop(inv)
+
     def check_for_new_peers(self):
         try:
             while len(self.peers) < self.peer_goal:
@@ -240,14 +261,49 @@ class Manager(threading.Thread):
             if inv in self.inprogress_invs:
                 return Manager.REQUEST_WAIT
 
-            if self.spv.txdb.has_tx(inv.hash):
-                return Manager.REQUEST_DONT
+            if inv.type == Inv.MSG_TX:
+                if self.spv.txdb.has_tx(inv.hash):
+                    return Manager.REQUEST_DONT
 
-            if self.tx_bloom_filter.has(inv.hash):
-                return Manager.REQUEST_DONT
+                if self.tx_bloom_filter.has(inv.hash):
+                    return Manager.REQUEST_DONT
+
+            elif inv.type == Inv.MSG_BLOCK:
+                if self.spv.blockchain.get_needs_headers():
+                    return Manager.REQUEST_WAIT
+
+                if inv.hash in self.spv.blockchain.blocks:
+                    return Manager.REQUEST_DONT
 
             self.inprogress_invs[inv] = time.time()
             return Manager.REQUEST_GO
+
+    def will_request_headers(self, peer):
+        with self.blockchain_sync_lock:
+            if not self.spv.blockchain.get_needs_headers():
+                return Manager.REQUEST_DONT
+
+            if self.headers_request is not None:
+                assert peer is not self.headers_request['peer'], "Don't do that"
+                return Manager.REQUEST_WAIT
+
+            if peer is self.headers_request_last_peer:
+                return Manager.REQUEST_WAIT
+
+            self.headers_request = {
+                'time': time.time(),
+                'peer': peer
+            }
+
+            self.headers_request_last_peer = peer
+
+            return Manager.REQUEST_GO
+
+    def will_request_blocks(self):
+        if self.spv.blockchain.get_needs_headers():
+            return Manager.REQUEST_DONT
+            
+        return Manager.REQUEST_GO
 
     def received_transaction(self, inv, tx):
         self.tx_bloom_filter.add(inv.hash)
@@ -258,8 +314,21 @@ class Manager(threading.Thread):
             if inv in self.inprogress_invs:
                 self.inprogress_invs.pop(inv)
 
-    def received_block(self, block):
-        pass
+    def received_headers(self, headers):
+        try:
+            return self.spv.blockchain.add_block_headers(headers)
+        finally:
+            with self.blockchain_sync_lock:
+                self.headers_request = None
+
+    def received_block(self, inv, block):
+        self.spv.blockchain.add_block(block)
+
+        with self.inv_lock:
+            if inv in self.inprogress_invs:
+                self.inprogress_invs.pop(inv)
+
+        self.spv.on_block(block)
 
 ################################################################################
 ################################################################################
@@ -297,6 +366,7 @@ class Peer(threading.Thread):
 
     def step(self):
         if self.state == 'init':
+            self.socket = None
             self.data_buffer = bytes()
             self.bytes_sent = 0
             self.bytes_received = 0
@@ -304,14 +374,21 @@ class Peer(threading.Thread):
             self.peer_verack = 0
             self.invs = {}
             self.inprogress_invs = {}
+            self.handshake_time = None
+            self.headers_request = None
+            self.blocks_request = None
+            self.syncing_blockchain = 1
+            self.next_sync_time = 0
             if self.make_connection():
                 self.send_version()
                 self.state = 'connected'
         elif self.state == 'connected':
             self.handle_outgoing_data()
             self.handle_incoming_data()
+            self.handle_initial_blockchain_sync()
             self.handle_invs()
         elif self.state == 'dead':
+            self.close_connection()
             self.running = False
 
     def make_connection(self):
@@ -331,10 +408,21 @@ class Peer(threading.Thread):
                 print("[PEER] {} could not connect.".format(self.peer_address))
             return False
 
+    def close_connection(self):
+        try:
+            if self.socket is not None:
+                self.socket.close()
+                self.socket = None
+        except:
+            # TODO :: catch the proper exception / close properly
+            traceback.print_exc()
+
     def handle_incoming_data(self):
         try:
             data = self.socket.recv(4096)
             self.bytes_received += len(data)
+        except ConnectionResetError:
+            data = b''
         except socket.timeout:
             # Normal, no new data
             return
@@ -349,7 +437,7 @@ class Peer(threading.Thread):
         self.data_buffer = self.data_buffer + data
 
         while self.state != 'dead':
-            command, payload, self.data_buffer = Serialize.unwrap_network_message(self.data_buffer)
+            command, payload, self.data_buffer = Serialize.unwrap_network_message(self.manager.spv.coin, self.data_buffer)
 
             if command is None:
                 break
@@ -388,13 +476,89 @@ class Peer(threading.Thread):
 
         cmd(payload)
 
-    def handle_invs(self):
-        if len(self.inprogress_invs) >= Peer.MAX_INVS_IN_PROGRESS:
-            # TODO - remove invs that have not gotten any data (we need to distinguish from
-            # not getting any data vs. a large block taking more than x time to download)
+    def handle_initial_blockchain_sync(self):
+        # Sync headers until we're within some window of blocks
+        # of the creation date of our wallet. From that point forward
+        # sync and process full blocks.
+        #
+        # Some magic happens here to make sure we're not just downloading
+        # headers and blocks from a small group peers.
+
+        if self.syncing_blockchain == 0:
             return
 
         now = time.time()
+
+        if self.headers_request is not None:
+            # Manager checks to see if our headers_request has timed out, so we don't need to.
+            return
+
+        if self.blocks_request is not None:
+            if (now - self.blocks_request) > Manager.GETBLOCKS_REQUEST_TIMEOUT:
+                # The only safe assumption we can make here is that the peer doesn't know about any more blocks. Thus, we have everything.
+                self.blocks_request = None
+
+                if self.syncing_blockchain == 2:
+                    self.state = 'dead'
+                    self.manager.peer_is_bad(self.peer_address)
+                    if self.manager.spv.logging_level <= DEBUG:
+                        print("[PEER] {} peer is messing with our blockchain sync".format(self.peer_address))
+                else:
+                    self.syncing_blockchain = 0
+            return
+
+        # Delay requests as necessary
+        if time.time() < self.next_sync_time:
+            return
+
+        # Wait for a bit before requesting from peer
+        if self.handshake_time is None or (time.time() - self.handshake_time) < Manager.BLOCKCHAIN_SYNC_WAIT_TIME:
+            return
+
+        # Requesting from peer wouldn't work, says the peer!
+        if self.manager.spv.blockchain.get_best_chain_height() >= self.peer_last_block:
+            return
+
+        r = self.manager.will_request_headers(self)
+        if r == Manager.REQUEST_GO:
+            self.headers_request = time.time()
+            self.send_getheaders(self.manager.spv.blockchain.get_best_chain_locator())
+            return
+        elif r == Manager.REQUEST_WAIT:
+            # Manager wants to give another peer the chance to deliver headers
+            self.next_sync_time = time.time() + 5
+            return
+        elif r == Manager.REQUEST_DONT:
+            # We're done syncing headers. try getblocks...
+            pass
+
+        # We don't need to call getblocks if we know about any blocks
+        # handle_invs will eventually request the blocks
+        if any(inv.type == Inv.MSG_BLOCK for inv in self.invs.keys()):
+            return
+
+        r = self.manager.will_request_blocks()
+        if r == Manager.REQUEST_GO:
+            self.blocks_request = time.time()
+            self.send_getblocks(self.manager.spv.blockchain.get_best_chain_locator())
+            return
+        elif r == Manager.REQUEST_WAIT:
+            # We never really get here...
+            self.next_sync_time = time.time() + 5
+            return
+        elif r == Manager.REQUEST_DONT:
+            # Manager says so!
+            pass
+
+    def handle_invs(self):
+        now = time.time()
+
+        # TODO - remove invs that have not gotten any data (we need to distinguish from
+        # not getting any data vs. a large block taking more than x time to download)
+
+        if len(self.inprogress_invs) >= Peer.MAX_INVS_IN_PROGRESS:
+            return
+
         requests = set()
         aborts = set()
 
@@ -403,13 +567,6 @@ class Peer(threading.Thread):
                 # This mechanism allows us to "retry" fetching the item later if one request fails
                 continue
             
-            # TODO - handle blocks
-            # TEMP
-            if inv.type == Inv.MSG_BLOCK:
-                aborts.add(inv)
-                continue
-            # TEMP
-
             res = self.manager.will_request_inv(inv)
             if res == Manager.REQUEST_GO:
                 assert inv not in self.inprogress_invs
@@ -447,13 +604,16 @@ class Peer(threading.Thread):
         
         nonce      = random.randrange(0, 1 << 64)
         user_agent = Serialize.serialize_string(Manager.USER_AGENT)
-        last_block = 0 # TODO blockchain.get_height()
+        last_block = 0 # we aren't a full node...
 
         payload = struct.pack("<LQQ", version, services, now) + recipient_address + sender_address + struct.pack("<Q", nonce) + user_agent + struct.pack("<L", last_block)
-        self.queue_outgoing_data(Serialize.wrap_network_message("version", payload))
+        self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "version", payload))
 
     def send_verack(self):
-        self.queue_outgoing_data(Serialize.wrap_network_message("verack", b''))
+        self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "verack", b''))
+
+    def send_pong(self, payload):
+        self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "pong", payload))
 
     def send_getdata(self, invs):
         data = []
@@ -461,9 +621,25 @@ class Peer(threading.Thread):
             data.append(inv.serialize())
 
         payload = Serialize.serialize_variable_int(len(data)) + b''.join(data)
-        self.queue_outgoing_data(Serialize.wrap_network_message("getdata", payload))
+        self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "getdata", payload))
         if self.manager.spv.logging_level <= DEBUG:
             print("[PEER] {} sent getdata for {} items".format(self.peer_address, len(invs)))
+
+    def send_getheaders(self, block_locator):
+        last_block = (b'\x00' * 32)
+        payload = struct.pack("<L", Manager.PROTOCOL_VERSION) + block_locator.serialize() + last_block
+
+        self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "getheaders", payload))
+        if self.manager.spv.logging_level <= DEBUG:
+            print("[PEER] {} sent getheaders (block_locator top={})".format(self.peer_address, bytes_to_hexstring(block_locator.hashes[0])))
+
+    def send_getblocks(self, block_locator):
+        last_block = (b'\x00' * 32)
+        payload = struct.pack("<L", Manager.PROTOCOL_VERSION) + block_locator.serialize() + last_block
+
+        self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "getblocks", payload))
+        if self.manager.spv.logging_level <= DEBUG:
+            print("[PEER] {} sent getblocks".format(self.peer_address))
 
     def cmd_version(self, payload):
         if len(payload) < 20:
@@ -472,8 +648,10 @@ class Peer(threading.Thread):
             self.state = 'dead'
             return
 
+        self.peer_version = 0
+
         try:
-            self.peer_version, self.peer_services, _ = struct.unpack("<LQQ", payload[:20])
+            self.peer_version, self.peer_services, self.peer_time = struct.unpack("<LQQ", payload[:20])
             _, _, payload = Serialize.unserialize_network_address(payload[20:], with_timestamp=False)
             _, _, payload = Serialize.unserialize_network_address(payload, with_timestamp=False)
             nonce = struct.unpack("<Q", payload[:8])[0]
@@ -484,16 +662,44 @@ class Peer(threading.Thread):
             self.state = 'dead'
             self.manager.peer_is_bad(self.peer_address)
             if self.manager.spv.logging_level <= DEBUG:
-                print("[PEER] {} bad version.".format(self.peer_address))
+                print("[PEER] {} bad version {}".format(self.peer_address, self.peer_version))
             return
 
         if self.manager.spv.logging_level <= INFO:
             print("[PEER] {} version {} (User-agent {}, last block {})".format(self.peer_address, self.peer_version, self.peer_user_agent, self.peer_last_block))
+
+        time_offset = abs(self.peer_time - time.time())
+        if time_offset > 140*60:
+            # Peer time is just too out of wack.
+            if self.manager.spv.logging_level <= WARNING:
+                print("[PEER] {} peer's clock (or yours!) is off by too much ({} sec)".format(self.peer_address, time_offset))
+            self.state = 'dead'
+            return
+
+        # Let's only connect to peers that are fully synced.  If we connect to a syncing peer, it doesn't
+        # really benefit us and it possibly harms them since we can't send them blocks.
+        if self.peer_last_block < self.manager.spv.blockchain.get_best_chain_height():
+            if self.manager.spv.logging_level <= INFO:
+                print("[PEER] {} peer doesn't have a blockchain longer than ours".format(self.peer_address))
+            self.state = 'dead'
+            return
+
         self.send_verack()
         self.peer_verack += 1
 
+        if self.peer_verack == 2:
+            self.manager.spv.add_time_data(self.peer_time)
+            self.handshake_time = time.time()
+
     def cmd_verack(self, payload):
         self.peer_verack += 1
+
+        if self.peer_verack == 2:
+            self.manager.spv.add_time_data(self.peer_time)
+            self.handshake_time = time.time()
+
+    def cmd_ping(self, payload):
+        self.send_pong(payload)
 
     def cmd_addr(self, payload):
         count, payload = Serialize.unserialize_variable_int(payload)
@@ -508,35 +714,84 @@ class Peer(threading.Thread):
         for i in range(count):
             inv, payload = Inv.unserialize(payload)
 
-            if inv.type == Inv.MSG_ERROR:
-                if self.manager.spv.logging_level <= INFO:
-                    print('[PEER] {} inv error {}'.format(self.peer_address, bytes_to_hexstring(inv.hash)))
+            if self.manager.spv.logging_level <= INFO:
+                print('[PEER] {} got {}'.format(self.peer_address, str(inv)))
 
-            elif inv.type == Inv.MSG_TX:
-                if self.manager.spv.logging_level <= INFO:
-                    print('[PEER] {} inv tx {}'.format(self.peer_address, bytes_to_hexstring(inv.hash)))
-
-            elif inv.type == Inv.MSG_BLOCK:
-                if self.manager.spv.logging_level <= INFO:
-                    print('[PEER] {} inv block {}'.format(self.peer_address, bytes_to_hexstring(inv.hash)))
-                #!key = (inv, time.time())
-                #!self.known_blocks_order[self.known_blocks_order_index] = key
-                #!self.known_blocks_order_index += 1
+            if inv.type == Inv.MSG_BLOCK:
+                # Doesn't matter if this was a getblocks request or
+                # unsolicited. We now know about at least one block and should
+                # fetch it before calling getblocks again.
+                self.blocks_request = None
 
             if inv not in self.invs and inv not in self.inprogress_invs:
                 self.invs[inv] = time.time()
 
-        # We can reset the getblocks if we have gotten a response...
-        #! if len(self.known_blocks) >= 50:
-        #!     self.last_get_blocks_time = 0
-
     def cmd_tx(self, payload):
-        tx, _ = Transaction.unserialize(payload)
+        tx, _ = Transaction.unserialize(payload, self.manager.spv.coin)
         tx_hash = tx.hash()
         inv = Inv(Inv.MSG_TX, tx_hash)
+
+        if self.manager.spv.logging_level <= INFO:
+            print("[PEER] {} got tx {}".format(self.peer_address, bytes_to_hexstring(inv.hash)))
+
         if inv in self.inprogress_invs:
             self.manager.received_transaction(inv, tx)
             self.inprogress_invs.pop(inv)
         else:
             raise Exception("peer sent a tx without us asking it to")
 
+    def cmd_headers(self, payload):
+        count, payload = Serialize.unserialize_variable_int(payload)
+
+        headers = []
+        for i in range(count):
+            block_header, payload = BlockHeader.unserialize(payload, self.manager.spv.coin)
+            headers.append(block_header)
+
+            tx_count, payload = Serialize.unserialize_variable_int(payload)
+            
+            bad_peer = not block_header.check() or tx_count != 0
+            if bad_peer:
+                # Misbehaving peer: all headers are actually blocks with 0 transactions
+                if self.manager.spv.logging_level <= WARNING:
+                    print("[PEER] {} sent bad headers".format(self.peer_address, len(headers)))
+                self.manager.peer_is_bad(self.peer_address)
+                self.state = 'dead'
+                return
+
+        if self.manager.spv.logging_level <= INFO:
+            print("[PEER] {} got {} headers".format(self.peer_address, len(headers)))
+        
+        if not self.manager.received_headers(headers):
+            if len(headers) != 0:
+                # Blockchain didn't accept our headers? bad...
+                self.manager.peer_is_bad(self.peer_address)
+                self.state = 'dead'
+            
+        self.headers_request = None
+
+    def cmd_block(self, payload):
+        block, payload = Block.unserialize(payload, self.manager.spv.coin)
+
+        if not block.check():
+            # peer sent a bad block?
+            if self.manager.spv.logging_level <= WARNING:
+                print("[PEER] {} peer sent bad block {}".format(self.peer_address, block))
+            self.manager.peer_is_bad(self.peer_address)
+            self.state = 'dead'
+            return
+
+        inv = Inv(Inv.MSG_BLOCK, block.header.hash())
+        if inv in self.inprogress_invs:
+            if self.manager.spv.logging_level <= INFO:
+                print("[PEER] {} got {}".format(self.peer_address, block))
+ 
+            self.manager.received_block(inv, block)
+            self.inprogress_invs.pop(inv)
+
+            # If we are not syncing from this peer and the peer sends us a block that doesn't connect,
+            # we should try syncing again.  If the peer again doesn't send us blocks, we should disconnect.
+            if self.syncing_blockchain == 0 and not self.manager.spv.blockchain.blocks[inv.hash]['connected']:
+                self.syncing_blockchain = 2
+        else:
+            raise Exception("peer sent a block without us asking it to")
