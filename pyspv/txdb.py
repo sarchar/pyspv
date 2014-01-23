@@ -11,11 +11,15 @@ class TransactionDatabase:
         self.spv = spv
         self.transaction_database_file = self.spv.config.get_file("txdb")
         self.db_lock = threading.Lock()
+        self.transaction_cache = set()
+
+        with closing(shelve.open(self.transaction_database_file)) as txdb:
+            for tx_hash_str in txdb.keys():
+                self.transaction_cache.add(hexstring_to_bytes(tx_hash_str))
 
     def has_tx(self, tx_hash):
         with self.db_lock:
-            with closing(shelve.open(self.transaction_database_file)) as txdb:
-                return bytes_to_hexstring(tx_hash) in txdb
+            return tx_hash in self.transaction_cache
 
     def get_tx(self, tx_hash):
         with self.db_lock:
@@ -26,7 +30,10 @@ class TransactionDatabase:
 
     def save_tx(self, tx):
         with self.db_lock:
-            with closing(shelve.open(self.transaction_database_file)) as txdb:
-                txdb[bytes_to_hexstring(tx.hash())] = tx.serialize()
-
+            if tx_hash_str not in self.transaction_cache:
+                with closing(shelve.open(self.transaction_database_file)) as txdb:
+                    tx_hash = tx.hash()
+                    tx_hash_str = bytes_to_hexstring(tx_hash)
+                    txdb[tx_hash_str] = tx.serialize()
+                    self.transaction_cache.add(tx_hash)
 

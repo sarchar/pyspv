@@ -1,16 +1,16 @@
 import struct
 
-from .payments import BasePayments
+from .payment import BasePayment
 from ..serialize import Serialize
 from ..transaction import TransactionPrevOut
-from ..wallet import Coins
+from ..wallet import Spend
 
 from ..script import *
 from ..util import *
 
-class SimpleCoins(Coins):
+class SimpleSpend(Spend):
     def __init__(self, amount, address, prevout, script, watch):
-        Coins.__init__(self, amount)
+        Spend.__init__(self, amount)
 
         self.prevout = prevout
         self.script = script
@@ -41,15 +41,15 @@ class SimpleCoins(Coins):
 
         watch, data = Serialize.unserialize_dict(data[4+script_length:])
 
-        coins = SimpleCoins(amount, address, prevout, script, watch)
-        return coins, data
+        spends = SimpleSpend(amount, address, prevout, script, watch)
+        return spends, data
 
-class SimplePayments(BasePayments):
+class SimplePayment(BasePayment):
     name = 'simple_payments'
-    coins = SimpleCoins
+    spend_class = SimpleSpend
 
     def __init__(self, spv):
-        BasePayments.__init__(self, spv)
+        BasePayment.__init__(self, spv)
 
         self.watch_addresses = {}
 
@@ -76,6 +76,12 @@ class SimplePayments(BasePayments):
         }
 
     def on_tx(self, tx):
+        save_tx = False
+
+        if self.spv.txdb.has_tx(tx.hash()):
+            # We've seen this tx before.  Done.
+            return
+
         for i, output in enumerate(tx.outputs):
             script = output.script.program
 
@@ -96,8 +102,12 @@ class SimplePayments(BasePayments):
                     print('[SIMPLEPAYMENTS] payment of {} to {} received'.format(output.amount, address))
 
                 prevout = TransactionPrevOut(tx.hash(), i)
-                coins = SimpleCoins(output.amount, address, prevout, script, watch)
-                self.spv.wallet.add_coins(self, coins)
+                spend = SimpleSpend(output.amount, address, prevout, script, watch)
+                self.spv.wallet.add_spend(self, spend)
+                save_tx = True
+
+        if save_tx:
+            self.spv.txdb.save_tx(tx)
 
         # TODO - check inputs, they might spend coins from the wallet
 

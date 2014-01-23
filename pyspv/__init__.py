@@ -8,7 +8,7 @@ from . import wallet
 
 from .bitcoin import *
 from .util import *
-from .payments.simple import SimplePayments
+from .payments.simple import SimplePayment
 
 class pyspv:
     class config:
@@ -55,7 +55,7 @@ class pyspv:
             print('[PYSPV] app data at {}'.format(self.config.path))
 
         self.wallet = wallet.Wallet(spv=self)
-        self.wallet.register_payments(SimplePayments(spv=self))
+        self.wallet.register_payments(SimplePayment(spv=self))
         self.wallet.load_wallet()
 
         self.blockchain = blockchain.Blockchain(spv=self)

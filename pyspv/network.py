@@ -75,8 +75,24 @@ class Manager(threading.Thread):
         self.running = False
 
     def join(self, *args, **kwargs):
+        kwargs['timeout'] = 3
         for _, p in self.peers.items():
             p.join(*args, **kwargs)
+            if p.is_alive():
+                import sys
+                print("*** STACKTRACE - START :: peer({}) ***".format(p.peer_address))
+                code = []
+                for thread_id, stack in sys._current_frames().items():
+                    code.append("\n# Thread ID: {}".format(thread_id))
+                    for filename, lineno, name, line in traceback.extract_stack(stack):
+                        code.append('\nFile: "{}", line {}, in {}'.format(filename, lineno, name))
+                        if line:
+                            code.append("  {}".format(line.strip()))
+                
+                for line in code:
+                    print(line, end='')
+
+                print("\n*** STACKTRACE - END ***")
         threading.Thread.join(self, *args, **kwargs)
 
     def run(self):
@@ -556,7 +572,7 @@ class Peer(threading.Thread):
         # TODO - remove invs that have not gotten any data (we need to distinguish from
         # not getting any data vs. a large block taking more than x time to download)
 
-        if len(self.inprogress_invs) >= Peer.MAX_INVS_IN_PROGRESS:
+        if len(self.inprogress_invs) > 0:
             return
 
         requests = set()

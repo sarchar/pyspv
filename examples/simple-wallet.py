@@ -6,13 +6,11 @@ def on_tx(tx):
     return False
 
 def main():
-    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=2, testnet=False)
+    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=4, testnet=True)
                 #listen=('0.0.0.0', 8334),
                 #listen=None,
                 #proxy=...,
-                #testnet=True,
-                #peer_goal=20,
-                #relay=False,
+                #relay_tx=False,
  
     if len(list(spv.wallet.private_keys())) == 0:
         spv.wallet.create_new_private_key()

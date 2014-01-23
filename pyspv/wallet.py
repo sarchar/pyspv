@@ -15,12 +15,20 @@ class Wallet:
         self.payment_types_by_name = {}
         self.wallet_file = self.spv.config.get_file("wallet")
         self.wallet_lock = threading.Lock()
-        self.coins = []
+        self.spends = []
 
         with self.wallet_lock:
             with closing(shelve.open(self.wallet_file)) as d:
                 if 'creation_time' not in d:
                     d['creation_time'] = time.time()
+
+                if not 'spends' in d:
+                    d['spends'] = []
+                elif isinstance(d['spends'], dict):
+                    d['spends'] = []
+
+                if not 'keys' in d:
+                    d['keys'] = []
 
                 self.creation_time = d['creation_time']
 
@@ -32,9 +40,6 @@ class Wallet:
     def save_private_key(self, private_key, label=''):
         with self.wallet_lock:
             with closing(shelve.open(self.wallet_file)) as d:
-                if not 'keys' in d:
-                    d['keys'] = []
-
                 keys = d['keys']
                 key_index = len(keys)
 
@@ -48,40 +53,34 @@ class Wallet:
         for pm in self.payment_types:
             pm.add_key(private_key, key_index)
 
-    def add_coins(self, pm, new_coins):
+    def add_spend(self, pm, new_spend):
         with self.wallet_lock:
             with closing(shelve.open(self.wallet_file)) as d:
-
-                if not 'coins' in d:
-                    d['coins'] = []
-                elif isinstance(d['coins'], dict):
-                    d['coins'] = []
-
-                coins = d['coins']
-                coins.append({
-                    'coins'       : new_coins.serialize(),
+                spends = d['spends']
+                spends.append({
+                    'spends'       : new_spend.serialize(),
                     'payment_type': pm.__class__.name,
                 })
 
-                d['coins'] = coins
+                d['spends'] = spends
 
-                self.coins.append({
-                    'coins'       : new_coins,
+                self.spends.append({
+                    'spends'       : new_spend,
                     'payment_type': pm,
                 })
 
-                self.balance += new_coins.amount
+                self.balance += new_spend.amount
 
     def load_wallet(self):
         self.balance = 0
 
         with self.wallet_lock:
             with closing(shelve.open(self.wallet_file)) as d:
-                if 'coins' in d:
-                    for coins in d['coins']:
-                        pm = self.payment_types_by_name[coins['payment_type']]
-                        self.coins.append(pm.__class__.coins.unserialize(coins['coins'])[0])
-                        self.balance += self.coins[-1].amount
+                if 'spends' in d:
+                    for spends in d['spends']:
+                        pm = self.payment_types_by_name[spends['payment_type']]
+                        self.spends.append(pm.__class__.spend_class.unserialize(spends['spends'])[0])
+                        self.balance += self.spends[-1].amount
 
         if self.spv.logging_level <= INFO:
             print('[WALLET] loaded with balance of {} BTC'.format(self.balance))
@@ -102,7 +101,7 @@ class Wallet:
         for pm in self.payment_types:
             pm.on_tx(tx)
 
-class Coins:
+class Spend:
     def __init__(self, amount):
         self.amount = amount
 
