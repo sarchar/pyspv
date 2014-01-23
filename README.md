@@ -26,7 +26,7 @@ pyspv only relies on a small handful of dependencies:
 
 * [Python 3.3](http://www.python.org/) :: It probably works on other versions, but this is my testing platform.
 * OpenSSL :: You'll need libssl.so (Linux/Mac) or libeay32.dll (Windows) in your path.
-* [Bitarray](https://github.com/ilanschnell/bitarray) :: This is required by the bloom filter implementation.
+* [Bitarray](https://pypi.python.org/pypi/bitarray/) :: This is required by the bloom filter implementation.
 
 examples
 ========
