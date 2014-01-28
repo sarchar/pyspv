@@ -159,8 +159,11 @@ class Serialize:
 
     @staticmethod
     def unwrap_network_message(coin, data):
+        '''a message is only complete if the 2nd return value is not None. We return
+        command and length so that the network can decide to drop an unresponsive or
+        misbehaving peer'''
         if len(data) < 24:
-            return None, None, data
+            return None, None, None, data
 
         magic = data[:4]
         if magic != coin.NETWORK_MAGIC:
@@ -179,7 +182,7 @@ class Serialize:
         checksum = data[20:24]
 
         if (len(data) - 24) < length:
-            return None, None, data
+            return command, None, length, data
         
         payload = data[24:24+length]
         leftover = data[24+length:]
@@ -188,5 +191,5 @@ class Serialize:
         if hash[:4] != checksum:
             raise MessageChecksumFailure()
 
-        return command, payload, leftover
+        return command, payload, length, leftover
 

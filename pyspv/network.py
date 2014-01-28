@@ -37,6 +37,11 @@ class Manager(threading.Thread):
 
     HEADERS_REQUEST_TIMEOUT   = 25
     GETBLOCKS_REQUEST_TIMEOUT = 60
+    BLOCK_REQUEST_TIMEOUT     = 120
+    TX_REQUEST_TIMEOUT        = 30
+
+    MAX_MESSAGE_SIZE = 2*1024*1024
+
 
     def __init__(self, spv=None, callbacks=None, peer_goal=1):
         threading.Thread.__init__(self)
@@ -102,6 +107,8 @@ class Manager(threading.Thread):
             print("[NETWORK] starting")
 
         while self.running:
+            now = time.time()
+
             if len(self.peer_addresses) < 5:
                 self.get_new_addresses_from_peer_sources()
 
@@ -109,8 +116,11 @@ class Manager(threading.Thread):
             self.check_for_new_peers()
 
             with self.blockchain_sync_lock:
-                if self.headers_request is not None and (time.time() - self.headers_request['time']) >= Manager.HEADERS_REQUEST_TIMEOUT:
-                    # Misbehaving peer?
+                if self.headers_request is not None and \
+                       ((self.headers_request['peer'].inprogress_command != 'headers' and (now - self.headers_request['time']) >= Manager.HEADERS_REQUEST_TIMEOUT) or \
+                        (self.headers_request['peer'].inprogress_command == 'headers' and (now - self.headers_request['peer'].last_data_time) >= Manager.HEADERS_REQUEST_TIMEOUT)):
+
+                    # Misbehaving/dead peer?
                     self.peer_is_bad(self.headers_request['peer'].peer_address)
                     self.headers_request['peer'].state = 'dead'
 
@@ -322,8 +332,10 @@ class Manager(threading.Thread):
         return Manager.REQUEST_GO
 
     def received_transaction(self, inv, tx):
-        self.tx_bloom_filter.add(inv.hash)
-        self.spv.on_tx(tx)
+        '''tx is None -> peer failed to deliver the transaction'''
+        if tx is not None:
+            self.tx_bloom_filter.add(inv.hash)
+            self.spv.on_tx(tx)
 
         # Do this after adding the tx to the wallet to handle race condition
         with self.inv_lock:
@@ -386,6 +398,9 @@ class Peer(threading.Thread):
             self.data_buffer = bytes()
             self.bytes_sent = 0
             self.bytes_received = 0
+            self.last_data_time = time.time()
+            self.last_block_time = time.time()
+            self.inprogress_command = ''
             self.outgoing_data_queue = collections.deque()
             self.peer_verack = 0
             self.invs = {}
@@ -451,11 +466,19 @@ class Peer(threading.Thread):
             return
 
         self.data_buffer = self.data_buffer + data
+        self.last_data_time = time.time()
 
         while self.state != 'dead':
-            command, payload, self.data_buffer = Serialize.unwrap_network_message(self.manager.spv.coin, self.data_buffer)
+            command, payload, length, self.data_buffer = Serialize.unwrap_network_message(self.manager.spv.coin, self.data_buffer)
+            self.inprogress_command = command
 
-            if command is None:
+            if length is not None and length > Manager.MAX_MESSAGE_SIZE:
+                if self.manager.spv.logging_level <= WARNING:
+                    print("[PEER] {} sent a large message. dropping.".format(self.peer_address))
+                self.state = 'dead'
+                break
+
+            if payload is None:
                 break
 
             self.handle_command(command, payload)
@@ -569,16 +592,32 @@ class Peer(threading.Thread):
     def handle_invs(self):
         now = time.time()
 
-        # TODO - remove invs that have not gotten any data (we need to distinguish from
-        # not getting any data vs. a large block taking more than x time to download)
-
         if len(self.inprogress_invs) > 0:
-            return
+            inprogress_block_invs = [inv for inv in self.inprogress_invs if inv.type == Inv.MSG_BLOCK]
+            if len(inprogress_block_invs):
+                if self.inprogress_command != 'block' and (now - self.last_block_time) > Manager.BLOCK_REQUEST_TIMEOUT:
+                    # Peer is ignoring our request for blocks...
+                    if self.manager.spv.logging_level <= WARNING:
+                        print('[PEER] {} peer is ignoring our request for blocks'.format(self.peer_address))
+                    self.state = 'dead'
+                    return
+
+            # TODO - should we consider the peer misbehaving if its ignoring our request for transactions?
+            inprogress_tx_invs = ((inv, when) for inv, when in self.inprogress_invs.items() if inv.type == Inv.MSG_TX)
+            for inv, when in inprogress_tx_invs:
+                if (now - when) > Manager.TX_REQUEST_TIMEOUT:
+                    # Tell manager (by passing None) that the tx request timed out
+                    self.manager.received_transaction(inv, None)
+                    self.inprogress_invs.pop(inv)
+
+            if len(self.inprogress_invs):
+                return
 
         requests = set()
         aborts = set()
 
-        for inv, when in self.invs.items():
+        # This loop prioritizes blocks
+        for inv, when in sorted(self.invs.items(), key=lambda x: 1 if x[0].type == Inv.MSG_BLOCK else 2):
             if when > now:
                 # This mechanism allows us to "retry" fetching the item later if one request fails
                 continue
@@ -804,6 +843,7 @@ class Peer(threading.Thread):
  
             self.manager.received_block(inv, block)
             self.inprogress_invs.pop(inv)
+            self.last_block_time = time.time()
 
             # If we are not syncing from this peer and the peer sends us a block that doesn't connect,
             # we should try syncing again.  If the peer again doesn't send us blocks, we should disconnect.
