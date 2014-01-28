@@ -8,7 +8,7 @@ from . import wallet
 
 from .bitcoin import *
 from .util import *
-from .payments.simple import SimplePayment
+from .monitors.simple import SimplePayment
 
 class pyspv:
     class config:
