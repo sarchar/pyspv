@@ -2,13 +2,14 @@ import os
 import time
 
 from . import blockchain
+from . import keys
 from . import network
 from . import txdb
 from . import wallet
 
 from .bitcoin import *
 from .util import *
-from .monitors.simple import SimplePayment
+from .monitors.simple import PubKeyPaymentMonitor
 
 class pyspv:
     class config:
@@ -54,9 +55,8 @@ class pyspv:
         if self.logging_level <= INFO:
             print('[PYSPV] app data at {}'.format(self.config.path))
 
-        self.wallet = wallet.Wallet(spv=self)
-        self.wallet.register_payments(SimplePayment(spv=self))
-        self.wallet.load_wallet()
+        self.wallet = wallet.Wallet(spv=self, monitors=[PubKeyPaymentMonitor])
+        #self.wallet.load_wallet()
 
         self.blockchain = blockchain.Blockchain(spv=self)
 

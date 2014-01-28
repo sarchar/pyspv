@@ -7,15 +7,20 @@ from contextlib import closing
 from .keys import PrivateKey
 from .util import *
 
+class DuplicateWalletItem(Exception):
+    pass
+
 class Wallet:
     '''The Wallet is responsible for managing private keys and spendable inputs'''
-    def __init__(self, spv=None):
+    def __init__(self, spv=None, monitors=[]):
         self.spv = spv
         self.payment_types = set()
         self.payment_types_by_name = {}
         self.wallet_file = self.spv.config.get_file("wallet")
         self.wallet_lock = threading.Lock()
         self.spends = []
+        self.monitors = [m(spv) for m in monitors]
+        self.collection_sizes = {}
 
         with self.wallet_lock:
             with closing(shelve.open(self.wallet_file)) as d:
@@ -27,31 +32,61 @@ class Wallet:
                 elif isinstance(d['spends'], dict):
                     d['spends'] = []
 
-                if not 'keys' in d:
-                    d['keys'] = []
+                # TODO - delete this code after saving old keys
+                if 'keys' in d:
+                    print("!!!!!!!!!! OLD KEYS !!!!!!!!!!!!")
+                    for key in d['keys']:
+                        print(PrivateKey.unserialize(key['key'])[0].as_wif(self.spv.coin, False))
+                        print(PrivateKey.unserialize(key['key'])[0].as_wif(self.spv.coin, True))
+                    print("!!!!!!!!!! OLD KEYS !!!!!!!!!!!!")
+                        
+                if 'wallet' not in d:
+                    d['wallet'] = {}
 
                 self.creation_time = d['creation_time']
+                self.__load_wallet(d)
 
-    def create_new_private_key(self, label=''):
-        pk = PrivateKey.create_new()
-        self.save_private_key(pk, label=label)
-        return pk
+    def __load_wallet(self, d):
+        collections = d['wallet']
+        for collection_name in collections.keys():
+            self.collection_sizes[collection_name] = len(collections[collection_name])
+            for item, metadata in collections[collection_name].items():
+                for m in self.monitors:
+                    if hasattr(m, 'on_' + collection_name):
+                        getattr(m, 'on_' + collection_name)(item, metadata)
 
-    def save_private_key(self, private_key, label=''):
+    def add(self, collection_name, item, metadata):
+        '''item must be pickle serializable and implement __hash__ and __eq__'''
+        assert isinstance(collection_name, str)
+        assert isinstance(metadata, dict)
+
         with self.wallet_lock:
             with closing(shelve.open(self.wallet_file)) as d:
-                keys = d['keys']
-                key_index = len(keys)
+                wallet = d['wallet']
+                if collection_name not in wallet:
+                    collection = {}
+                else:
+                    collection = wallet[collection_name]
 
-                keys.append({
-                    'key'   : private_key.serialize(),
-                    'label' : label,
-                })
+                if item in collection:
+                    raise DuplicateWalletItem()
 
-                d['keys'] = keys
+                # TODO maybe this is going to get slow with large wallets.
+                collection[item] = metadata
+                wallet[collection_name] = collection
+                d['wallet'] = wallet
 
-        for pm in self.payment_types:
-            pm.add_key(private_key, key_index)
+            if collection_name not in self.collection_sizes:
+                self.collection_sizes[collection_name] = 0
+            self.collection_sizes[collection_name] += 1
+
+            for m in self.monitors:
+                if hasattr(m, 'on_' + collection_name):
+                    getattr(m, 'on_' + collection_name)(item, metadata)
+
+    def len(self, collection_name):
+        with self.wallet_lock:
+            return self.collection_sizes.get(collection_name, 0)
 
     def add_spend(self, pm, new_spend):
         with self.wallet_lock:
@@ -59,7 +94,7 @@ class Wallet:
                 spends = d['spends']
                 spends.append({
                     'spends'       : new_spend.serialize(),
-                    'payment_type': pm.__class__.name,
+                    'payment_type': pm.__class__.__name__,
                 })
 
                 d['spends'] = spends
@@ -87,7 +122,7 @@ class Wallet:
 
     def register_payments(self, pm):
         self.payment_types.add(pm)
-        self.payment_types_by_name[pm.__class__.name] = pm
+        self.payment_types_by_name[pm.__class__.__name__] = pm
 
     def private_keys(self):
         with self.wallet_lock:
@@ -104,4 +139,16 @@ class Wallet:
 class Spend:
     def __init__(self, amount):
         self.amount = amount
+
+    def __hash__(self):
+        return self.hash()
+
+    def __eq__(self, other):
+        return self is other or (self.__class__ is other.__class__ and self.hash() == other.hash())
+        
+    def hash(self):
+        raise self.spv.coin.hash(self.serialize())
+
+    def serialize(self):
+        raise NotImplementedError("must implement in derived class")
 

@@ -32,6 +32,12 @@ class PrivateKey:
     def __init__(self, secret):
         self.secret = secret
 
+    def __hash__(self):
+        return int.from_bytes(self.secret, 'little')
+
+    def __eq__(self, other):
+        return self is other or (self.__class__ is other.__class__ and self.secret == other.secret)
+
     def as_wif(self, coin, compressed):
         '''WIF - wallet import format'''
         return base58_check(coin, self.secret + (b'\x01' if compressed else b''), version_bytes=coin.PRIVATE_KEY_VERSION_BYTES)

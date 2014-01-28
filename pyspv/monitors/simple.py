@@ -1,6 +1,6 @@
 import struct
 
-from .payment import BasePayment
+from .payment import BaseMonitor
 from ..serialize import Serialize
 from ..transaction import TransactionPrevOut
 from ..wallet import Spend
@@ -8,7 +8,7 @@ from ..wallet import Spend
 from ..script import *
 from ..util import *
 
-class SimpleSpend(Spend):
+class PubKeySpend(Spend):
     def __init__(self, amount, address, prevout, script, watch):
         Spend.__init__(self, amount)
 
@@ -44,35 +44,28 @@ class SimpleSpend(Spend):
         spends = SimpleSpend(amount, address, prevout, script, watch)
         return spends, data
 
-class SimplePayment(BasePayment):
-    name = 'simple_payments'
-    spend_class = SimpleSpend
+class PubKeyPaymentMonitor(BaseMonitor):
+    spend_class = PubKeySpend
 
     def __init__(self, spv):
-        BasePayment.__init__(self, spv)
+        BaseMonitor.__init__(self, spv)
+        self.pubkey_addresses = {}
 
-        self.watch_addresses = {}
-
-        # Loop over all private keys, and build a set of bitcoin addresses
-        for i, e in enumerate(self.spv.wallet.private_keys()):
-            pk, label = e
-            self.add_key(pk, i)
-
-    def add_key(self, pk, i):
-        address = pk.get_public_key(False).as_address(self.spv.coin)
+    def on_private_key(self, private_key, metadata):
+        address = private_key.get_public_key(False).as_address(self.spv.coin)
         if self.spv.logging_level <= DEBUG:
-            print('[SIMPLEPAYMENTS] watching for payments to {}'.format(address))
-        self.watch_addresses[address] = {
+            print('[PUBKEYPAYMENTS] watching for payments to {}'.format(address))
+
+        self.pubkey_addresses[address] = {
             'compressed': False,
-            'key_index' : i,
         }
 
-        address = pk.get_public_key(True).as_address(self.spv.coin)
+        address = private_key.get_public_key(True).as_address(self.spv.coin)
         if self.spv.logging_level <= DEBUG:
-            print('[SIMPLEPAYMENTS] watching for payments to {}'.format(address))
-        self.watch_addresses[address] = {
+            print('[PUBKEYPAYMENTS] watching for payments to {}'.format(address))
+
+        self.pubkey_addresses[address] = {
             'compressed': True,
-            'key_index' : i,
         }
 
     def on_tx(self, tx):
@@ -96,7 +89,7 @@ class SimplePayment(BasePayment):
                 # Not simple payment
                 continue
 
-            watch = self.watch_addresses.get(address, None)
+            watch = self.pubkey_addresses.get(address, None)
             if watch is not None:
                 if self.spv.logging_level <= DEBUG:
                     print('[SIMPLEPAYMENTS] payment of {} to {} received'.format(output.amount, address))

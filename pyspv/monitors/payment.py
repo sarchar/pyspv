@@ -1,5 +1,5 @@
 
-class BasePayment:
+class BaseMonitor:
     def __init__(self, spv):
         self.spv = spv
 
