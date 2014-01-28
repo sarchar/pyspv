@@ -9,7 +9,7 @@ from . import wallet
 
 from .bitcoin import *
 from .util import *
-from .monitors.simple import PubKeyPaymentMonitor
+from .monitors.pubkey import PubKeyPaymentMonitor
 
 class pyspv:
     class config:
