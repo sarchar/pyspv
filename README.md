@@ -6,7 +6,7 @@ SPV client protocol.  Connecting to the Bitcoin network is as easy as:
 
 ```python
 import pyspv
-spv = pyspv.pyspv()
+spv = pyspv.pyspv("demo")
 ...
 ```
 
