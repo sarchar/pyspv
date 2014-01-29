@@ -52,7 +52,7 @@ class pyspv:
         self.callbacks = pyspv.callbacks(on_tx=on_tx, on_block=on_block, on_block_added=on_block_added, on_block_removed=on_block_removed)
         self.config = pyspv.config(app_name, testnet=testnet)
 
-        if self.logging_level <= INFO:
+        if self.logging_level <= DEBUG:
             print('[PYSPV] app data at {}'.format(self.config.path))
 
         self.wallet = wallet.Wallet(spv=self, monitors=[PubKeyPaymentMonitor])
@@ -99,22 +99,27 @@ class pyspv:
             if self.callbacks.on_block(block):
                 return
 
+        block_hash = block.header.hash()
         for tx in block.transactions:
+            # Calling on_tx allows the wallet to process the transaction and eventually call txdb.save_tx so
+            # that bind_tx works successfully
             self.on_tx(tx)
+            self.txdb.bind_tx(tx.hash(), block_hash)
 
     def on_block_added(self, block_hash):
         if self.callbacks is not None and self.callbacks.on_block_added is not None:
             if self.callbacks.on_block_added(block_hash):
                 return
 
-        block_link = self.blockchain.blocks[block_hash]
-        # TODO confirmations
+        self.txdb.on_block_added(block_hash)
+        # block_link = self.blockchain.blocks[block_hash] ...
 
     def on_block_removed(self, block_hash):
         if self.callbacks is not None and self.callbacks.on_block_removed is not None:
             if self.callbacks.on_block_removed(block_hash):
                 return
 
+        self.txdb.on_block_removed(block_hash)
         block_link = self.blockchain.blocks[block_hash]
         # TODO confirmations
 

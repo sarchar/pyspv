@@ -350,13 +350,12 @@ class Manager(threading.Thread):
                 self.headers_request = None
 
     def received_block(self, inv, block):
+        self.spv.on_block(block)
         self.spv.blockchain.add_block(block)
 
         with self.inv_lock:
             if inv in self.inprogress_invs:
                 self.inprogress_invs.pop(inv)
-
-        self.spv.on_block(block)
 
 ################################################################################
 ################################################################################

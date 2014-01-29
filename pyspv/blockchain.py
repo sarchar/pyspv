@@ -34,7 +34,6 @@ class Blockchain:
 
         self.unknown_referenced_blocks = collections.defaultdict(set)
 
-        changes = []
         with self.blockchain_lock:
             with closing(shelve.open(self.blockchain_db_file)) as db:
                 if 'needs_headers' not in db:
@@ -64,7 +63,9 @@ class Blockchain:
 
                     header, _ = BlockHeader.unserialize(link['header'], self.spv.coin)
                     block_link = self.create_block_link(header.hash(), height=link['height'], work=link['work'], header=header)
-                    changes = self.__connect_block_link(None, block_link, skip_validation=True)
+
+                    # changes are ignored when loading
+                    self.__connect_block_link(None, block_link, skip_validation=True)
 
                     # First block has to be manually connected. The rest of the blocks will connect
                     if i == 0:
@@ -78,8 +79,6 @@ class Blockchain:
 
                 if self.spv.logging_level <= INFO:
                     print('[BLOCKCHAIN] done ({:5.3f} sec)'.format(time.time()-start_time))
-
-        self.__run_changes(changes)
 
     def create_block_link(self, hash, height=0, main=False, connected=False, prev=None, header=None, work=None):
         if work is None and header is not None:
@@ -188,8 +187,11 @@ class Blockchain:
     def __run_changes(self, changes):
         for change in changes:
             if change[0] == 'removed':
+                # TODO - looks like there's a bug in forking, leaving this here to try and track it down
+                print(changes)
+                raise Exception("fixing fork!")
                 self.spv.on_block_removed(change[1])
-            elif change[1] == 'added':
+            elif change[0] == 'added':
                 self.spv.on_block_added(change[1])
 
     def __connect_block_link(self, blockchain, block_link, skip_validation=False):
