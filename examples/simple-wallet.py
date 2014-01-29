@@ -6,7 +6,7 @@ def on_tx(tx):
     return False
 
 def main():
-    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=0, testnet=True)
+    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=8, testnet=True)
                 #listen=('0.0.0.0', 8334),
                 #listen=None,
                 #proxy=...,

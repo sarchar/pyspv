@@ -15,6 +15,12 @@ class PublicKey:
     def __init__(self, pubkey):
         self.pubkey = pubkey
 
+    def is_compressed(self):
+        return self.pubkey[0] in (0x02, 0x03) and len(self.pubkey) == 33
+
+    def as_hex(self, coin):
+        return bytes_to_hexstring(self.pubkey, reverse=False)
+
     def as_address(self, coin):
         return base58_check(coin, coin.hash160(self.pubkey), version_bytes=coin.ADDRESS_VERSION_BYTES)
 
@@ -27,6 +33,11 @@ class PublicKey:
         else:
             c = bytes([0x02]) + x_coord
         return c
+
+    @staticmethod
+    def from_hex(self, s):
+        pubkey = hexstring_to_bytes(s, reverse=False)
+        return PublicKey(pubkey)
 
 class PrivateKey:
     def __init__(self, secret):

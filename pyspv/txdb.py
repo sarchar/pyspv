@@ -30,9 +30,9 @@ class TransactionDatabase:
 
     def save_tx(self, tx):
         with self.db_lock:
-            if tx_hash_str not in self.transaction_cache:
+            tx_hash = tx.hash()
+            if tx_hash not in self.transaction_cache:
                 with closing(shelve.open(self.transaction_database_file)) as txdb:
-                    tx_hash = tx.hash()
                     tx_hash_str = bytes_to_hexstring(tx_hash)
                     txdb[tx_hash_str] = tx.serialize()
                     self.transaction_cache.add(tx_hash)

@@ -34,9 +34,6 @@ class Blockchain:
 
         self.unknown_referenced_blocks = collections.defaultdict(set)
 
-        # Every time we connect to the network we should sync
-        self.initial_sync = True
-
         changes = []
         with self.blockchain_lock:
             with closing(shelve.open(self.blockchain_db_file)) as db:
@@ -63,6 +60,7 @@ class Blockchain:
                 for i in range(db['blockchain']['count']):
                     index = (start + i) % self.saved_blockchain_length
                     link = links[index]
+                    #print('connecting {}/{}, {}'.format(i, db['blockchain']['count'], bytes_to_hexstring(link['hash'])))
 
                     header, _ = BlockHeader.unserialize(link['header'], self.spv.coin)
                     block_link = self.create_block_link(header.hash(), height=link['height'], work=link['work'], header=header)
@@ -98,9 +96,6 @@ class Blockchain:
             'header'   : header,
             'work'     : work,
         }
-
-    def sync_complete(self):
-        self.initial_sync = False
 
     def get_best_chain_locator(self):
         return BlockLocator(self.best_chain)

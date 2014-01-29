@@ -56,7 +56,6 @@ class pyspv:
             print('[PYSPV] app data at {}'.format(self.config.path))
 
         self.wallet = wallet.Wallet(spv=self, monitors=[PubKeyPaymentMonitor])
-        #self.wallet.load_wallet()
 
         self.blockchain = blockchain.Blockchain(spv=self)
 

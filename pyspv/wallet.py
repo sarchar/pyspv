@@ -1,3 +1,4 @@
+from collections import defaultdict
 import shelve
 import threading
 import time
@@ -18,19 +19,24 @@ class Wallet:
         self.payment_types_by_name = {}
         self.wallet_file = self.spv.config.get_file("wallet")
         self.wallet_lock = threading.Lock()
-        self.spends = []
+        self.temp_collections_lock = threading.Lock()
         self.monitors = [m(spv) for m in monitors]
+        self.spend_classes = {}
         self.collection_sizes = {}
+        self.temp_collections = {}
+        self.temp_collection_sizes = {}
+
+        for m in monitors:
+            for sc in m.spend_classes:
+                self.spend_classes[sc.__name__] = sc
 
         with self.wallet_lock:
             with closing(shelve.open(self.wallet_file)) as d:
                 if 'creation_time' not in d:
                     d['creation_time'] = time.time()
 
-                if not 'spends' in d:
-                    d['spends'] = []
-                elif isinstance(d['spends'], dict):
-                    d['spends'] = []
+                if 'spends' not in d or isinstance(d['spends'], list):
+                    d['spends'] = {}
 
                 # TODO - delete this code after saving old keys
                 if 'keys' in d:
@@ -53,7 +59,28 @@ class Wallet:
             for item, metadata in collections[collection_name].items():
                 for m in self.monitors:
                     if hasattr(m, 'on_' + collection_name):
-                        getattr(m, 'on_' + collection_name)(item, metadata)
+                        getattr(m, 'on_' + collection_name)(self, item, metadata)
+
+        self.spends = {}
+        self.balance = defaultdict(int)
+        for _, spend_dict in d['spends'].items():
+            spend_class = self.spend_classes[spend_dict['class']]
+            spend, _ = spend_class.unserialize(spend_dict['data'], self.spv.coin)
+            self.spends[spend.hash()] = {
+                'spend'   : spend,
+                'spent'   : False,
+            }
+            self.balance[spend.category] += spend.amount
+            for m in self.monitors:
+                if hasattr(m, 'on_spend'):
+                    getattr(m, 'on_spend')(self, spend)
+
+        if self.spv.logging_level <= INFO:
+            print('[WALLET] loaded with balance of {} BTC'.format(dict(self.balance)))
+
+    def len(self, collection_name):
+        with self.wallet_lock:
+            return self.collection_sizes.get(collection_name, 0)
 
     def add(self, collection_name, item, metadata):
         '''item must be pickle serializable and implement __hash__ and __eq__'''
@@ -82,62 +109,62 @@ class Wallet:
 
             for m in self.monitors:
                 if hasattr(m, 'on_' + collection_name):
-                    getattr(m, 'on_' + collection_name)(item, metadata)
+                    getattr(m, 'on_' + collection_name)(self, item, metadata)
 
-    def len(self, collection_name):
-        with self.wallet_lock:
-            return self.collection_sizes.get(collection_name, 0)
+    def add_temp(self, collection_name, item, metadata):
+        '''item must be implement __hash__ and __eq__'''
+        assert isinstance(collection_name, str)
+        assert isinstance(metadata, dict)
+        with self.temp_collections_lock:
+            collection = self.temp_collections.get(collection_name, {})
 
-    def add_spend(self, pm, new_spend):
+            if item in collection:
+                raise DuplicateWalletItem()
+
+            collection[item] = metadata
+
+            if collection_name not in self.temp_collection_sizes:
+                self.temp_collection_sizes[collection_name] = 0
+            self.temp_collection_sizes[collection_name] += 1
+
+    def add_spend(self, spend):
         with self.wallet_lock:
             with closing(shelve.open(self.wallet_file)) as d:
+                spend_hash = spend.hash()
+
                 spends = d['spends']
-                spends.append({
-                    'spends'       : new_spend.serialize(),
-                    'payment_type': pm.__class__.__name__,
-                })
+                spends[spend_hash] = {
+                    'class'   : spend.__class__.__name__,
+                    'data'    : spend.serialize(),
+                    'spent'   : False,
+                }
 
                 d['spends'] = spends
 
-                self.spends.append({
-                    'spends'       : new_spend,
-                    'payment_type': pm,
-                })
+                self.spends[spend_hash] = {
+                    'spend'   : spend,
+                    'spent'   : False,
+                }
 
-                self.balance += new_spend.amount
+                if spend.category not in self.balance:
+                    self.balance[spend.category] = 0
 
-    def load_wallet(self):
-        self.balance = 0
+                self.balance[spend.category] += spend.amount
 
-        with self.wallet_lock:
-            with closing(shelve.open(self.wallet_file)) as d:
-                if 'spends' in d:
-                    for spends in d['spends']:
-                        pm = self.payment_types_by_name[spends['payment_type']]
-                        self.spends.append(pm.__class__.spend_class.unserialize(spends['spends'])[0])
-                        self.balance += self.spends[-1].amount
+                if self.spv.logging_level <= INFO:
+                    print('[WALLET] added {} to wallet category {} (new balance={})'.format(spend.amount, spend.category, self.balance[spend.category]))
 
-        if self.spv.logging_level <= INFO:
-            print('[WALLET] loaded with balance of {} BTC'.format(self.balance))
-
-    def register_payments(self, pm):
-        self.payment_types.add(pm)
-        self.payment_types_by_name[pm.__class__.__name__] = pm
-
-    def private_keys(self):
-        with self.wallet_lock:
-            with closing(shelve.open(self.wallet_file)) as d:
-                if 'keys' in d:
-                    for e in d['keys']:
-                        pk, _ = PrivateKey.unserialize(e['key'])
-                        yield pk, e['label']
+                return True
 
     def on_tx(self, tx):
-        for pm in self.payment_types:
-            pm.on_tx(tx)
+        for m in self.monitors:
+            if hasattr(m, 'on_tx'):
+                getattr(m, 'on_tx')(tx)
 
 class Spend:
-    def __init__(self, amount):
+    def __init__(self, coin, category, amount):
+        self.coin = coin
+        self.category = category
         self.amount = amount
 
     def __hash__(self):
@@ -147,7 +174,7 @@ class Spend:
         return self is other or (self.__class__ is other.__class__ and self.hash() == other.hash())
         
     def hash(self):
-        raise self.spv.coin.hash(self.serialize())
+        return self.coin.hash(self.serialize())
 
     def serialize(self):
         raise NotImplementedError("must implement in derived class")
