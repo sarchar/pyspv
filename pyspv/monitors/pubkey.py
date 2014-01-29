@@ -24,9 +24,7 @@ class PubKeySpend(Spend):
         return self.get_confirmations() >= 6
 
     def get_confirmations(self, spv):
-        # TODO
-        # return spv.blockchain.get_best_chain_height() - get_best_block_height_containing(self.prevout.tx_hash)
-        return 0
+        return spv.txdb.get_tx_depth(self.prevout.tx_hash)
         
     def create_inputs(self):
         # TODO - returns list of PubKeySpendInputs, which individually sign an input (at this point, not all inputs/outputs are determined so

@@ -52,6 +52,20 @@ class Bitcoin:
         hasher2.update(hasher.digest())
         return hasher2.digest()
 
+    @staticmethod
+    def format_money(amount):
+        assert isinstance(amount, int)
+        neg = ''
+        if amount < 0:
+            neg = '-'
+            amount *= -1
+        dec = amount % 100000000
+        v = '{}{}.{:08}'.format(neg, amount // 100000000, dec).rstrip('0')
+        if v[-1] == '.':
+            v = v + '0'
+        return v
+
+
 class BitcoinTestnet(Bitcoin):
     ADDRESS_VERSION_BYTES     = b'\x6f'
     PRIVATE_KEY_VERSION_BYTES = bytes([0x6f + 0x80])

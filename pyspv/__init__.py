@@ -42,6 +42,7 @@ class pyspv:
             self.on_block_removed = on_block_removed
 
     def __init__(self, app_name, testnet=False, peer_goal=8, logging_level=WARNING, on_tx=None, on_block=None, on_block_added=None, on_block_removed=None):
+        self.app_name = app_name
         self.time_offset = 0
         self.logging_level = logging_level
         self.testnet = testnet
