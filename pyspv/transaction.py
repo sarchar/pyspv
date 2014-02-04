@@ -56,6 +56,12 @@ class TransactionPrevOut:
         self.tx_hash = tx_hash
         self.n = n
 
+    def __eq__(self, other):
+        return self is other or (self.tx_hash == other.tx_hash and self.n == other.n)
+
+    def __hash__(self):
+        return hash((self.tx_hash, self.n))
+
     def serialize(self):
         return self.tx_hash + struct.pack("<L", self.n)
 

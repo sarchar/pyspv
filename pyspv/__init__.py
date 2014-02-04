@@ -9,6 +9,7 @@ from . import txdb
 from . import wallet
 
 from .bitcoin import *
+from .transaction import Transaction, TransactionInput, TransactionOutput, TransactionPrevOut
 from .util import *
 from .monitors.pubkey import PubKeyTransactionBuilder, PubKeyPaymentMonitor
 
@@ -59,11 +60,12 @@ class pyspv:
         if self.logging_level <= DEBUG:
             print('[PYSPV] app data at {}'.format(self.config.path))
 
-        self.wallet = wallet.Wallet(spv=self, monitors=[PubKeyPaymentMonitor])
-
+        # It's important that the txdb be available before the wallet loads (computing balance requires knowing confirmations in the spends)
+        # And the txdb requires the blockchain to be loaded
         self.blockchain = blockchain.Blockchain(spv=self)
-
         self.txdb = txdb.TransactionDatabase(spv=self)
+
+        self.wallet = wallet.Wallet(spv=self, monitors=[PubKeyPaymentMonitor])
 
         self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, callbacks=self.callbacks)
         self.network_manager.start()
@@ -93,7 +95,7 @@ class pyspv:
 
     def broadcast_transaction(self, tx, must_confirm=False):
         # Let wallet see the tx...
-        #self.on_tx(tx)
+        self.on_tx(tx)
 
         # In case the wallet didn't save the tx...
         if must_confirm:

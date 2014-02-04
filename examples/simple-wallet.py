@@ -63,10 +63,15 @@ def getnewaddress(label='', compressed=0):
     spv.wallet.add('private_key', pk, {'label': label})
     return pk.get_public_key(compressed).as_address(spv.coin)
 
+@exception_printer
+def listspends():
+    s = [str(spend['spend']) for spend in spv.wallet.spends.values()]
+    return '\n'.join(s)
+
 def server_main():
     global spv
 
-    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=2, testnet=True)
+    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=8, testnet=True)
                 #listen=('0.0.0.0', 8334),
                 #listen=None,
                 #proxy=...,
@@ -77,6 +82,7 @@ def server_main():
     rpc_server.register_function(getbalance)
     rpc_server.register_function(sendtoaddress)
     rpc_server.register_function(getinfo)
+    rpc_server.register_function(listspends)
 
     try:
         rpc_server.serve_forever()

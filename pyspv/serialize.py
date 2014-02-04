@@ -57,23 +57,35 @@ class Serialize:
             return struct.unpack("<Q", data[1:9])[0], data[9:]
 
     @staticmethod
+    def serialize_bytes(b):
+        length = Serialize.serialize_variable_int(len(b))
+        return length + b
+
+    @staticmethod
+    def unserialize_bytes(data):
+        length, data = Serialize.unserialize_variable_int(data)
+        b = data[:length]
+        return b, data[length:]
+
+    @staticmethod
     def serialize_string(s):
-        s = s.encode('utf8')
-        length = Serialize.serialize_variable_int(len(s))
-        return length + s
+        return Serialize.serialize_bytes(s.encode('utf8'))
 
     @staticmethod
     def unserialize_string(data):
-        length, data = Serialize.unserialize_variable_int(data)
-        s = data[:length].decode("utf8")
-        return s, data[length:]
+        s, data = Serialize.unserialize_bytes(data)
+        return s.decode('utf8'), data
 
     @staticmethod
     def serialize_object(o):
         if isinstance(o, int):
             return b'v' + Serialize.serialize_variable_int(o)
+        elif isinstance(o, bytes):
+            return b'b' + Serialize.serialize_bytes(o)
         elif isinstance(o, str):
             return b's' + Serialize.serialize_string(o)
+        elif isinstance(o, list):
+            return b'l' + Serialize.serialize_list(o)
         elif isinstance(o, dict):
             return b'd' + Serialize.serialize_dict(o)
 
@@ -82,10 +94,31 @@ class Serialize:
         t = bytes([data[0]])
         if t == b'v':
             return Serialize.unserialize_variable_int(data[1:])
+        elif t == b'b':
+            return Serialize.unserialize_bytes(data[1:])
         elif t == b's':
             return Serialize.unserialize_string(data[1:])
+        elif t == b'l':
+            return Serialize.unserialize_list(data[1:])
         elif t == b'd':
             return Serialize.unserialize_dict(data[1:])
+
+    @staticmethod
+    def serialize_list(items):
+        count = Serialize.serialize_variable_int(len(items))
+        r = []
+        for item in items:
+            r.append(Serialize.serialize_object(item))
+        return count + b''.join(r)
+
+    @staticmethod
+    def unserialize_list(data):
+        count, data = Serialize.unserialize_variable_int(data)
+        r = []
+        for _ in range(count):
+            item, data = Serialize.unserialize_object(data)
+            r.append(item)
+        return r, data
 
     @staticmethod
     def serialize_dict(d):

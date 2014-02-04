@@ -68,16 +68,18 @@ class Wallet:
         self.spends = {}
         self.spends_by_index = []
         self.balance = defaultdict(int)
+        self.balance_spends = set()
         for _, spend_dict in d['spends'].items():
             spend_class = self.spend_classes[spend_dict['class']]
             spend, _ = spend_class.unserialize(spend_dict['data'], self.spv.coin)
             spend_hash = spend.hash()
             self.spends[spend.hash()] = {
                 'spend'   : spend,
-                'spent'   : False,
             }
             self.spends_by_index.append(spend_hash)
-            self.balance[spend.category] += spend.amount
+            if not spend.is_spent():
+                self.balance[spend.category] += spend.amount
+                self.balance_spends.add(spend_hash)
             for m in self.monitors:
                 if hasattr(m, 'on_spend'):
                     getattr(m, 'on_spend')(self, spend)
@@ -118,6 +120,41 @@ class Wallet:
                 if hasattr(m, 'on_' + collection_name):
                     getattr(m, 'on_' + collection_name)(self, item, metadata)
 
+    def update(self, collection_name, item, metadata):
+        '''item must be pickle serializable and implement __hash__ and __eq__'''
+        assert isinstance(collection_name, str)
+        assert isinstance(metadata, dict)
+
+        with self.wallet_lock:
+            with closing(shelve.open(self.wallet_file)) as d:
+                wallet = d['wallet']
+                if collection_name not in wallet:
+                    collection = {}
+                else:
+                    collection = wallet[collection_name]
+
+                if item not in collection:
+                    raise AttributeError("item {} not in collection {}".format(str(item), collection_name))
+
+                # TODO maybe this is going to get slow with large wallets.
+                collection[item] = metadata
+                wallet[collection_name] = collection
+                d['wallet'] = wallet
+
+            for m in self.monitors:
+                if hasattr(m, 'on_' + collection_name):
+                    getattr(m, 'on_' + collection_name)(self, item, metadata)
+
+    def get(self, collection_name, item):
+        '''item must be implement __hash__ and __eq__. Returns metadata bound to the item or None if not found'''
+        assert isinstance(collection_name, str)
+        with self.wallet_lock:
+            with closing(shelve.open(self.wallet_file)) as d:
+                wallet = d['wallet']
+                if collection_name not in wallet:
+                    return None
+                return wallet[collection_name][item]
+
     def add_temp(self, collection_name, item, metadata):
         '''item must be implement __hash__ and __eq__'''
         assert isinstance(collection_name, str)
@@ -156,14 +193,12 @@ class Wallet:
                 spends[spend_hash] = {
                     'class'   : spend.__class__.__name__,
                     'data'    : spend.serialize(),
-                    'spent'   : False,
                 }
 
                 d['spends'] = spends
 
                 self.spends[spend_hash] = {
                     'spend'   : spend,
-                    'spent'   : False,
                 }
 
                 self.spends_by_index.append(spend_hash)
@@ -171,12 +206,61 @@ class Wallet:
                 if spend.category not in self.balance:
                     self.balance[spend.category] = 0
 
-                self.balance[spend.category] += spend.amount
+                if spend.is_spent() and spend_hash in self.balance_spends:
+                    self.balance[spend.category] -= spend.amount
+                    self.balance_spends.remove(spend_hash)
+
+                if not spend.is_spent() and spend_hash not in self.balance_spends:
+                    self.balance[spend.category] += spend.amount
+                    self.balance_spends.add(spend_hash)
+
+                for m in self.monitors:
+                    if hasattr(m, 'on_spend'):
+                        getattr(m, 'on_spend')(self, spend)
 
                 if self.spv.logging_level <= INFO:
                     print('[WALLET] added {} to wallet category {} (new balance={})'.format(spend.amount, spend.category, self.balance[spend.category]))
 
                 return True
+
+    def update_spend(self, spend):
+        with self.wallet_lock:
+            with closing(shelve.open(self.wallet_file)) as d:
+                spend_hash = spend.hash()
+
+                spends = d['spends']
+                if spend_hash not in spends:
+                    raise AttributeError("spend does not exist")
+
+                spends.pop(spend_hash)
+                spends[spend_hash] = {
+                    'class'   : spend.__class__.__name__,
+                    'data'    : spend.serialize(),
+                }
+
+                d['spends'] = spends
+
+                old_spend = self.spends.pop(spend_hash)
+                self.spends[spend_hash] = {
+                    'spend'   : spend,
+                }
+
+                if spend.category not in self.balance:
+                    self.balance[spend.category] = 0
+
+                if spend.is_spent() and spend_hash in self.balance_spends:
+                    self.balance[spend.category] -= old_spend['spend'].amount
+                    self.balance_spends.remove(spend_hash)
+
+                if not spend.is_spent() and spend_hash not in self.balance_spends:
+                    self.balance[spend.category] += spend.amount
+                    self.balance_spends.add(spend_hash)
+
+                if self.spv.logging_level <= INFO:
+                    print('[WALLET] updated {} in wallet category {} (new balance={})'.format(spend.amount, spend.category, self.balance[spend.category]))
+
+                return True
+
 
     def select_spends(self, categories, amount):
         with self.wallet_lock:
@@ -192,16 +276,16 @@ class Wallet:
             spends_below = []
 
             # use a random coprime generator to iterate over spends
+            # instead of duplicating the wallet unspent outputs
             p = random_coprime(len(self.spends_by_index))
 
             for i in range(len(self.spends_by_index)):
                 spend_hash = self.spends_by_index[(i * p) % len(self.spends_by_index)]
                 spend_dict = self.spends[spend_hash]
 
-                if spend_dict['spent']:
-                    continue
-
                 spend = spend_dict['spend']
+                if not spend.is_spendable(self.spv):
+                    continue
                 
                 # Only allow inputs from approved wallet categories
                 if spend.category not in categories:
