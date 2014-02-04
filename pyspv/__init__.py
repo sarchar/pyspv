@@ -10,7 +10,7 @@ from . import wallet
 
 from .bitcoin import *
 from .util import *
-from .monitors.pubkey import PubKeyPaymentBuilder, PubKeyPaymentMonitor
+from .monitors.pubkey import PubKeyTransactionBuilder, PubKeyPaymentMonitor
 
 VERSION = 'pyspv 0.0.1-alpha1'
 

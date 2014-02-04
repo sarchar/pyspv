@@ -9,7 +9,7 @@ from .util import *
 class InsufficientInputs(Exception):
     pass
 
-class PaymentBuilder:
+class TransactionBuilder:
     def __init__(self, wallet, memo=''):
         self.wallet = wallet
         self.memo = memo

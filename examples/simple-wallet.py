@@ -41,16 +41,16 @@ def getinfo():
 def sendtoaddress(address, amount, memo=''):
     address_bytes = int.to_bytes(pyspv.base58.decode(address), spv.coin.ADDRESS_BYTE_LENGTH, 'big')
     k = len(spv.coin.ADDRESS_VERSION_BYTES)
-    if address_bytes[:k] != spv.coin.ADDRESS_VERSION_BYTES:
-        return "error: bad address {}".format(address)
+    if address_bytes[:k] == spv.coin.ADDRESS_VERSION_BYTES:
+        payment_builder = pyspv.PubKeyTransactionBuilder(spv.wallet, memo=memo)
+        payment_builder.add_recipient(address, spv.coin.parse_money(amount))
+        tx = payment_builder.finish(True, True)
+        if not tx.verify_scripts():
+            raise Exception("internal error building transaction")
+        spv.broadcast_transaction(tx)
+        return pyspv.bytes_to_hexstring(tx.hash())
 
-    payment_builder = pyspv.PubKeyPaymentBuilder(spv.wallet, memo=memo)
-    payment_builder.add_recipient(address, spv.coin.parse_money(amount))
-    tx = payment_builder.finish(True, True)
-    if not tx.verify_scripts():
-        raise Exception("internal error building transaction")
-    spv.broadcast_transaction(tx)
-    return pyspv.bytes_to_hexstring(tx.hash())
+    return "error: bad address {}".format(address)
 
 @exception_printer
 def getbalance():

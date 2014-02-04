@@ -261,10 +261,11 @@ class Manager(threading.Thread):
         peer_addresses = list(self.peer_addresses.keys())
         while len(peer_addresses) > 0:
             k = random.randrange(0, len(peer_addresses))
-            p, peer_addresses = peer_addresses[k], peer_addresses[:k] + peer_addresses[k+1:]
-            p_ = ('127.0.0.1', 18333)
-            if p_ not in self.peers:
-                p = p_
+            peer_addresses[k], peer_addresses[len(peer_addresses)-1] = peer_addresses[len(peer_addresses)-1], peer_addresses[k]
+            p = peer_addresses.pop()
+            #p_ = ('127.0.0.1', 18333)
+            #if p_ not in self.peers:
+            #    p = p_
             if p not in self.peers:
                 self.peers[p] = Peer(self, p)
                 self.peers[p].start()

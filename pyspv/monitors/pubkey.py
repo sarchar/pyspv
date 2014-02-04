@@ -5,15 +5,15 @@ from .. import base58
 from ..keys import PrivateKey, PublicKey
 from ..serialize import Serialize
 from ..transaction import TransactionPrevOut, TransactionOutput, TransactionInput
-from ..paymentbuilder import PaymentBuilder
+from ..transactionbuilder import TransactionBuilder
 from ..wallet import InvalidAddress, Spend
 
 from ..script import *
 from ..util import *
 
-class PubKeyPaymentBuilder(PaymentBuilder):
+class PubKeyTransactionBuilder(TransactionBuilder):
     def __init__(self, *args, **kwargs):
-        PaymentBuilder.__init__(self, *args, **kwargs)
+        TransactionBuilder.__init__(self, *args, **kwargs)
         
     def add_recipient(self, address, amount):
         assert isinstance(amount, int), "amount must be in satoshis"
