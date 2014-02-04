@@ -12,23 +12,51 @@ RPC_LISTEN_PORT    = 18899
 
 spv = None
 
+def exception_printer(f):
+    def f2(*args, **kwargs):
+        nonlocal f
+        try:
+            return f(*args, **kwargs)
+        except:
+            traceback.print_exc()
+            return traceback.format_exc()
+    f2.__name__ = f.__name__
+    return f2
+
+@exception_printer
 def getinfo():
     return {
         'balance': spv.coin.format_money(sum(v for v in spv.wallet.balance.values())),
         'blocks': spv.blockchain.best_chain['height'],
-        'version': 'TODO',
+        'version': pyspv.VERSION,
+        'platform': sys.platform,
+        'python': sys.version,
         'user-agent': '',
         'app-name': spv.app_name,
         'testnet': spv.testnet,
         'coin': spv.coin.__name__,
     }
 
+@exception_printer
 def sendtoaddress(address, amount, memo=''):
-    pass
+    address_bytes = int.to_bytes(pyspv.base58.decode(address), spv.coin.ADDRESS_BYTE_LENGTH, 'big')
+    k = len(spv.coin.ADDRESS_VERSION_BYTES)
+    if address_bytes[:k] != spv.coin.ADDRESS_VERSION_BYTES:
+        return "error: bad address {}".format(address)
 
+    payment_builder = pyspv.PubKeyPaymentBuilder(spv.wallet, memo=memo)
+    payment_builder.add_recipient(address, spv.coin.parse_money(amount))
+    tx = payment_builder.finish(True, True)
+    if not tx.verify_scripts():
+        raise Exception("internal error building transaction")
+    spv.broadcast_transaction(tx)
+    return pyspv.bytes_to_hexstring(tx.hash())
+
+@exception_printer
 def getbalance():
     return dict((k, spv.coin.format_money(v)) for k, v in spv.wallet.balance.items())
 
+@exception_printer
 def getnewaddress(label='', compressed=0):
     compressed = bool(int(compressed))
     pk = pyspv.keys.PrivateKey.create_new()
@@ -38,7 +66,7 @@ def getnewaddress(label='', compressed=0):
 def server_main():
     global spv
 
-    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=0, testnet=True)
+    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=2, testnet=True)
                 #listen=('0.0.0.0', 8334),
                 #listen=None,
                 #proxy=...,

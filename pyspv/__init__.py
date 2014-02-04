@@ -2,6 +2,7 @@ import os
 import time
 
 from . import blockchain
+from . import inv
 from . import keys
 from . import network
 from . import txdb
@@ -9,7 +10,9 @@ from . import wallet
 
 from .bitcoin import *
 from .util import *
-from .monitors.pubkey import PubKeyPaymentMonitor
+from .monitors.pubkey import PubKeyPaymentBuilder, PubKeyPaymentMonitor
+
+VERSION = 'pyspv 0.0.1-alpha1'
 
 class pyspv:
     class config:
@@ -87,6 +90,18 @@ class pyspv:
             else:
                 # TODO - we should inform the app that we can't get good time data
                 self.time_offset = 0
+
+    def broadcast_transaction(self, tx, must_confirm=False):
+        # Let wallet see the tx...
+        #self.on_tx(tx)
+
+        # In case the wallet didn't save the tx...
+        if must_confirm:
+            self.txdb.save_tx(tx)
+
+        # Broadcast it
+        tx_inv = inv.Inv(inv.Inv.MSG_TX, tx.hash())
+        self.network_manager.add_to_inventory(tx_inv, tx, network.Manager.INVENTORY_FLAG_MUST_CONFIRM if must_confirm else 0)
 
     def on_tx(self, tx):
         if self.callbacks is not None and self.callbacks.on_tx is not None:

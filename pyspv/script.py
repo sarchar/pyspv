@@ -41,6 +41,9 @@ class Script:
     def __init__(self, program=b''):
         self.program = program
 
+    def push_op(self, op):
+        self.program = self.program + bytes([op])
+
     def push_bytes(self, data):
         assert isinstance(data, bytes)
 

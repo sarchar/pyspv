@@ -1,4 +1,5 @@
 from collections import defaultdict
+import random
 import shelve
 import threading
 import time
@@ -7,6 +8,9 @@ from contextlib import closing
 
 from .keys import PrivateKey
 from .util import *
+
+class InvalidAddress(Exception):
+    pass
 
 class DuplicateWalletItem(Exception):
     pass
@@ -62,14 +66,17 @@ class Wallet:
                         getattr(m, 'on_' + collection_name)(self, item, metadata)
 
         self.spends = {}
+        self.spends_by_index = []
         self.balance = defaultdict(int)
         for _, spend_dict in d['spends'].items():
             spend_class = self.spend_classes[spend_dict['class']]
             spend, _ = spend_class.unserialize(spend_dict['data'], self.spv.coin)
+            spend_hash = spend.hash()
             self.spends[spend.hash()] = {
                 'spend'   : spend,
                 'spent'   : False,
             }
+            self.spends_by_index.append(spend_hash)
             self.balance[spend.category] += spend.amount
             for m in self.monitors:
                 if hasattr(m, 'on_spend'):
@@ -125,7 +132,20 @@ class Wallet:
 
             if collection_name not in self.temp_collection_sizes:
                 self.temp_collection_sizes[collection_name] = 0
+
+            self.temp_collections[collection_name] = collection
             self.temp_collection_sizes[collection_name] += 1
+
+    def get_temp(self, collection_name, item):
+        '''item must be implement __hash__ and __eq__. Returns metadata bound to the item or None if not found'''
+        assert isinstance(collection_name, str)
+        with self.temp_collections_lock:
+            collection = self.temp_collections.get(collection_name, {})
+
+            if item not in collection:
+                return None
+
+            return collection[item]
 
     def add_spend(self, spend):
         with self.wallet_lock:
@@ -146,6 +166,8 @@ class Wallet:
                     'spent'   : False,
                 }
 
+                self.spends_by_index.append(spend_hash)
+
                 if spend.category not in self.balance:
                     self.balance[spend.category] = 0
 
@@ -155,6 +177,144 @@ class Wallet:
                     print('[WALLET] added {} to wallet category {} (new balance={})'.format(spend.amount, spend.category, self.balance[spend.category]))
 
                 return True
+
+    def select_spends(self, categories, amount):
+        with self.wallet_lock:
+            coins_ret = []
+            value_ret = 0
+
+            if self.spv.logging_level <= DEBUG:
+                print("[WALLET] select_spends: start for {} (categories={})".format(self.spv.coin.format_money(amount), ', '.join(categories)))
+
+            # build a list of spends where all spends are leq than the target
+            # and keep track of the spellest spend over the target
+            spend_smallest_over_amount = None
+            spends_below = []
+
+            # use a random coprime generator to iterate over spends
+            p = random_coprime(len(self.spends_by_index))
+
+            for i in range(len(self.spends_by_index)):
+                spend_hash = self.spends_by_index[(i * p) % len(self.spends_by_index)]
+                spend_dict = self.spends[spend_hash]
+
+                if spend_dict['spent']:
+                    continue
+
+                spend = spend_dict['spend']
+                
+                # Only allow inputs from approved wallet categories
+                if spend.category not in categories:
+                    continue
+
+                if spend.amount == amount:
+                    if self.spv.logging_level <= DEBUG:
+                        print("[WALLET] select_spends: found perfect match")
+                    return [spend]
+                elif spend.amount < (amount + self.spv.coin.DUST_LIMIT):
+                    if self.spv.logging_level <= DEBUG:
+                        print("[WALLET] select_spends: selecting {}".format(self.spv.coin.format_money(spend.amount)))
+                    spends_below.append(spend)
+                elif spend_smallest_over_amount is None or spend.amount < spend_smallest_over_amount.amount:
+                    spend_smallest_over_amount = spend
+
+            if self.spv.logging_level <= DEBUG and spend_smallest_over_amount is not None:
+                print("[WALLET] select_spends: smallest over target is {}".format(self.spv.coin.format_money(spend_smallest_over_amount.amount)))
+                    
+            total_below = sum(spend.amount for spend in spends_below)
+            if total_below == amount:
+                if self.spv.logging_level <= DEBUG:
+                    print("[WALLET] select_spends: sum of spends_below was a perfect match")
+                return spends_below
+
+            if total_below < amount:
+                if spend_smallest_over_amount is None:
+                    if self.spv.logging_level <= WARNING:
+                        print("[WALLET] select_spends: couldn't find enough inputs (total_below is {})".format(total_below))
+                    return []
+                else:
+                    if self.spv.logging_level <= DEBUG:
+                        print("[WALLET] select_spends: spends_below don't supply enough value... using a single spend of {} instead".format(self.spv.coin.format_money(spend_smallest_over_amount.amount)))
+                    return [spend_smallest_over_amount]
+
+            # this can be slow if there are lots of dusty inputs
+            spends_below.sort(key=lambda spend: spend.amount)
+
+            # solve subset sum by stochastic approximation
+            best_spends = self.approximate_best_subset(spends_below, amount, 1000)
+            best_total = sum(spend.amount for spend in best_spends)
+            if best_total != amount and total_below >= amount + self.spv.coin.DUST_LIMIT:
+                best_spends = self.approximate_best_subset(spends_below, amount + self.spv.coin.DUST_LIMIT, 1000)
+                best_total = sum(spend.amount for spend in best_spends)
+                
+            # if we have a bigger coin and either the stochastic approximation didn't find a good solution,
+            # or the next bigger coin is closer, return the bigger coin
+            if spend_smallest_over_amount is not None and ((best_total != amount and best_total < (amount + self.spv.coin.DUST_LIMIT)) or (spend_smallest_over_amount.amount <= best_total)):
+                coins_ret.append( spend_smallest_over_amount )
+                value_ret = spend_smallest_over_amount['value']
+                if self.spv.logging_level <= DEBUG:
+                    print("[WALLET] stochastic approximation failed to find a good subset (best was {}).. using a single larger input of {}!".format(best_total, spend_smallest_over_amount.amount))
+                return [spend_smallest_over_amount]
+            else:
+                if self.spv.logging_level <= DEBUG:
+                    print("[WALLET] stochastic approximation returned these coins:")
+                    for spend in best_spends:
+                        print("[WALLET]     spend = {}".format(str(spend)))
+                    print("[WALLET] total combined value = {} from {} coins".format(best_total, len(best_spends)))
+
+                return best_spends
+
+    def approximate_best_subset(self, spends, amount, iterations):
+        '''returns a list of coins that are cloest to the target amount'''
+        if self.spv.logging_level <= DEBUG:
+            print("[WALLET] approximate_best_subset: start for {} ({} iterations)".format(self.spv.coin.format_money(amount), iterations))
+
+        # initially start with all spends used
+        best_spends = [True] * len(spends)
+        best_value = sum(spend.amount for spend in spends)
+
+        for _ in range(iterations):
+            if best_value == amount:
+                break
+
+            included = [False] * len(spends)
+            total = 0
+
+            reached_target = False
+            for k in range(2):
+                if reached_target:
+                    break
+
+                for i in range(len(spends)): 
+                    if k == 0:
+                        include_this = bool(random.getrandbits(1))
+                    else:
+                        include_this = not included[i]
+
+                    if not include_this:
+                        continue
+
+                    total += spends[i].amount
+                    included[i] = True
+
+                    if total < amount:
+                        continue
+
+                    reached_target = True
+                    if total < best_value:
+                        best_value = total
+                        best_spends = included.copy()
+
+                    total -= spends[i].amount
+                    included[i] = False
+
+        result = []
+        for i, include in enumerate(best_spends):
+            if include:
+                result.append(spends[i])
+
+        return result
+
 
     def on_tx(self, tx):
         for m in self.monitors:

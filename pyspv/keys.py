@@ -15,14 +15,23 @@ class PublicKey:
     def __init__(self, pubkey):
         self.pubkey = pubkey
 
+    def __hash__(self):
+        return int.from_bytes(self.pubkey, 'big')
+
+    def __eq__(self, other):
+        return self is other or (self.pubkey == other.pubkey)
+
     def is_compressed(self):
         return self.pubkey[0] in (0x02, 0x03) and len(self.pubkey) == 33
 
-    def as_hex(self, coin):
+    def as_hex(self):
         return bytes_to_hexstring(self.pubkey, reverse=False)
 
     def as_address(self, coin):
         return base58_check(coin, coin.hash160(self.pubkey), version_bytes=coin.ADDRESS_VERSION_BYTES)
+
+    def as_hash160(self, coin):
+        return coin.hash160(self.pubkey)
 
     @staticmethod
     def compress(pubkey):
@@ -35,7 +44,7 @@ class PublicKey:
         return c
 
     @staticmethod
-    def from_hex(self, s):
+    def from_hex(s):
         pubkey = hexstring_to_bytes(s, reverse=False)
         return PublicKey(pubkey)
 
@@ -44,7 +53,7 @@ class PrivateKey:
         self.secret = secret
 
     def __hash__(self):
-        return int.from_bytes(self.secret, 'little')
+        return int.from_bytes(self.secret, 'big')
 
     def __eq__(self, other):
         return self is other or (self.__class__ is other.__class__ and self.secret == other.secret)
@@ -77,6 +86,36 @@ class PrivateKey:
         ssl_library.BN_free(bignum_private_key)
         ssl_library.EC_KEY_free(k)
         return PublicKey(PublicKey.compress(public_key) if compressed else public_key)
+
+    def sign(self, hash):
+        k = ssl_library.EC_KEY_new_by_curve_name(NID_secp256k1)
+        
+        storage = ctypes.create_string_buffer(self.secret)
+        bignum_private_key = ssl_library.BN_new()
+        ssl_library.BN_bin2bn(storage, 32, bignum_private_key)
+
+        group = ssl_library.EC_KEY_get0_group(k)
+        point = ssl_library.EC_POINT_new(group)
+
+        ssl_library.EC_POINT_mul(group, point, bignum_private_key, None, None, None)
+        ssl_library.EC_KEY_set_private_key(k, bignum_private_key)
+        ssl_library.EC_KEY_set_public_key(k, point)
+
+        assert isinstance(hash, bytes)
+        dgst = ctypes.cast((ctypes.c_ubyte*len(hash))(*[int(x) for x in hash]), ctypes.POINTER(ctypes.c_ubyte))
+
+        siglen = ctypes.c_int(ssl_library.ECDSA_size(k))
+        signature = ctypes.create_string_buffer(siglen.value)
+        if ssl_library.ECDSA_sign(0, dgst, len(hash), signature, ctypes.byref(siglen), k) == 0:
+            raise Exception("internal error: failed to sign")
+
+        signature = signature.raw[:siglen.value]
+
+        ssl_library.EC_POINT_free(point)
+        ssl_library.BN_free(bignum_private_key)
+        ssl_library.EC_KEY_free(k)
+
+        return signature
 
     @staticmethod
     def create_new(label=''):

@@ -4,10 +4,20 @@ from .script import Script
 from .serialize import Serialize
 from .util import *
 
+class TransactionTooExpensive(Exception):
+    def __init__(self, fee, *args, **kwargs):
+        Exception.__init__(self, *args, **kwargs)
+        self.fee = fee
+
 class TransactionOutput:
     def __init__(self, amount=0, script=Script()):
+        assert amount >= 0
         self.amount = amount
         self.script = script
+
+    def serialize_for_signature(self, flags):
+        '''Transaction outputs serialize exactly the same whether for signing or not'''
+        return self.serialize()
 
     def serialize(self):
         data_list = []
@@ -58,6 +68,9 @@ class TransactionPrevOut:
         n = struct.unpack("<L", data[32:36])[0]
         return TransactionPrevOut(tx_hash, n), data[36:]
 
+    def __str__(self):
+        return '<TransactionPrevOut {}:{}>'.format(bytes_to_hexstring(self.tx_hash), self.n)
+
 class TransactionInput:
     def __init__(self, prevout=TransactionPrevOut(), script=Script(), sequence=0xffffffff):
         self.prevout = prevout
@@ -66,6 +79,25 @@ class TransactionInput:
 
     def is_final(self):
         return self.sequence == 0xffffffff
+
+    def serialize_for_signature(self, is_self, flags):
+        data_list = []
+        data_list.append(self.prevout.serialize())
+
+        if is_self:
+            script_bytes = self.script
+        else:
+            script_bytes = b''
+
+        data_list.append(Serialize.serialize_variable_int(len(script_bytes)))
+        data_list.append(script_bytes)
+
+        if is_self or (flags & ~Transaction.SIGHASH_ANYONECANPAY) != Transaction.SIGHASH_NONE:
+            data_list.append(struct.pack("<L", self.sequence))
+        else:
+            data_list.append(struct.pack("<L", 0))
+
+        return b''.join(data_list)
 
     def serialize(self):
         data_list = []
@@ -104,21 +136,84 @@ class TransactionInput:
     def __str__(self):
         return '<tx_input {}:{} sequence={:04x} script={} bytes>'.format(bytes_to_hexstring(self.prevout.tx_hash), self.prevout.n, self.sequence, len(self.script.program))
 
-class Transaction:
-    CURRENT_VERSION = 1
+class UnsignedTransactionInput:
+    def __init__(self, input_creator):
+        self.input_creator = input_creator
 
-    def __init__(self, coin, version=CURRENT_VERSION, inputs=None, outputs=None, lock_time=0):
+    def sign(self, tx, input_index, flags):
+        hash_for_signature = tx.hash_for_signature(input_index, flags)
+        tx_input = self.input_creator.create_tx_input(hash_for_signature, flags)
+        return tx_input
+
+    def serialize_for_signature(self, is_self, flags):
+        data_list = []
+        data_list.append(self.input_creator.prevout.serialize())
+
+        if is_self:
+            script_bytes = self.input_creator.script
+        else:
+            script_bytes = b''
+
+        data_list.append(Serialize.serialize_variable_int(len(script_bytes)))
+        data_list.append(script_bytes)
+
+        if is_self or (flags & ~Transaction.SIGHASH_ANYONECANPAY) != Transaction.SIGHASH_NONE:
+            data_list.append(struct.pack("<L", self.input_creator.sequence))
+        else:
+            data_list.append(struct.pack("<L", 0))
+
+        return b''.join(data_list)
+
+    def serialize_size(self):
+        data_size = 0
+        data_size += TransactionPrevOut().serialize_size()
+
+        script_size = self.input_creator.estimated_script_size()
+        data_size += Serialize.serialize_variable_int_size(script_size)
+        data_size += script_size
+
+        data_size += 4
+        return data_size
+
+class Transaction:
+    SIGHASH_ALL = 1
+    SIGHASH_NONE = 2
+    SIGHASH_SINGLE = 3
+    SIGHASH_ANYONECANPAY = 0x80
+
+    def __init__(self, coin, version=None, inputs=None, outputs=None, lock_time=0):
         self.coin = coin
-        self.version = version
+        self.version = coin.TRANSACTION_VERSION if version is None else version
         self.inputs = [] if inputs is None else inputs
         self.outputs = [] if outputs is None else outputs
         self.lock_time = lock_time
+
+    def calculate_recommended_fee(self):
+        recommended_fee = (1 + (self.serialize_size() // 1000)) * self.coin.MINIMUM_TRANSACTION_FEE
+        recommended_fee_for_relay = (1 + (self.serialize_size() // 1000)) * self.coin.MINIMUM_TRANSACTION_FEE_FOR_RELAY
+        recommended_fee = max(recommended_fee, recommended_fee_for_relay)
+
+        # require at least the base fee if any output is dusty
+        if recommended_fee < self.coin.MINIMUM_TRANSACTION_FEE:
+            for output in self.outputs:
+                if output.amount < self.coin.DUST_LIMIT:
+                    recommended_fee = self.coin.MINIMUM_TRANSACTION_FEE
+                    break
+
+        # Sanity?
+        if recommended_fee > self.coin.MAXIMUM_TRANSACTION_FEE:
+            raise TransactionTooExpensive(recommended_fee)
+
+        return recommended_fee
 
     def __hash__(self):
         return self.hash()
 
     def hash(self):
         return self.coin.hash(self.serialize())
+
+    def hash_for_signature(self, input_index, flags):
+        return self.coin.hash(self.serialize_for_signature(input_index, flags))
 
     def is_coinbase(self):
         return len(self.inputs) == 1 and self.inputs[0].prevout.tx_hash == (b'\x00' * 32) and self.inputs[0].prevout.n == 0xffffffff
@@ -135,6 +230,39 @@ class Transaction:
             return False
 
         return True
+
+    def verify_scripts(self):
+        # TODO
+        return True
+
+    def serialize_for_signature(self, input_index, flags):
+        data_list = []
+        data_list.append(struct.pack("<L", self.version))
+
+        if (flags & Transaction.SIGHASH_ANYONECANPAY) != 0:
+            data_list.append(Serialize.serialize_variable_int(1))
+            data_list.append(self.inputs[input_index].serialize_for_signature(True, flags))
+        else:
+            data_list.append(Serialize.serialize_variable_int(len(self.inputs)))
+            for i, tx_input in enumerate(self.inputs):
+                data_list.append(tx_input.serialize_for_signature(i == input_index, flags))
+
+        output_flags = (flags & ~Transaction.SIGHASH_ANYONECANPAY)
+        if output_flags == Transaction.SIGHASH_NONE:
+            data_list.append(Serialize.serialize_variable_int(0))
+        elif output_flags == Transaction.SIGHASH_SINGLE:
+            assert input_index < len(self.outputs)
+            data_list.append(Serialize.serialize_variable_int(1))
+            data_list.append(self.outputs[input_index].serialize_for_signature(flags))
+        elif output_flags == Transaction.SIGHASH_ALL:
+            data_list.append(Serialize.serialize_variable_int(len(self.outputs)))
+            for i, output in enumerate(self.outputs):
+                data_list.append(output.serialize_for_signature(flags))
+
+        data_list.append(struct.pack("<L", self.lock_time))
+        data_list.append(struct.pack("<L", flags))
+
+        return b''.join(data_list)
 
     def serialize(self):
         data_list = []

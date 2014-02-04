@@ -1,3 +1,5 @@
+import fractions
+import random
 from . import base58
 
 DEBUG = 0
@@ -61,4 +63,13 @@ def target_to_bits(target):
         v = [0] + v
 
     return (m << 24) | (v[-1] << 16) | (v[-2] << 8) | v[-3]
+
+def random_coprime(n):
+    assert n < (1<<32)
+    p = random.randrange(n+1, 1<<32)
+    while True:
+        t = fractions.gcd(n, p)
+        if t == 1:
+            return p
+        p = p // t
 

@@ -42,6 +42,14 @@ class Manager(threading.Thread):
 
     MAX_MESSAGE_SIZE = 2*1024*1024
 
+    INVENTORY_CHECK_TIME = 1
+    MANAGE_INVENTORY_CHECK_TIME = 60
+    KEEP_BLOCK_IN_INVENTORY_TIME = 120*60
+    KEEP_TRANSACTION_IN_INVENTORY_TIME = 30*60
+    REBROADCAST_TRANSACTION_TIME = 30*60
+
+    INVENTORY_FLAG_HOLD_FOREVER = 0x01
+    INVENTORY_FLAG_MUST_CONFIRM = 0x02
 
     def __init__(self, spv=None, callbacks=None, peer_goal=1):
         threading.Thread.__init__(self)
@@ -56,6 +64,9 @@ class Manager(threading.Thread):
 
         self.inv_lock = threading.Lock()
         self.inprogress_invs = {}
+        self.inventory = collections.deque()
+        self.inventory_items = {}
+        self.last_manage_inventory_time = time.time()
 
         self.blockchain_sync_lock = threading.Lock()
 
@@ -63,6 +74,7 @@ class Manager(threading.Thread):
 
         self.headers_request = None
         self.headers_request_last_peer = None
+
 
     def start(self):
         self.running = False
@@ -114,6 +126,7 @@ class Manager(threading.Thread):
 
             self.check_for_dead_peers()
             self.check_for_new_peers()
+            self.manage_inventory()
 
             with self.blockchain_sync_lock:
                 if self.headers_request is not None and \
@@ -249,6 +262,9 @@ class Manager(threading.Thread):
         while len(peer_addresses) > 0:
             k = random.randrange(0, len(peer_addresses))
             p, peer_addresses = peer_addresses[k], peer_addresses[:k] + peer_addresses[k+1:]
+            p_ = ('127.0.0.1', 18333)
+            if p_ not in self.peers:
+                p = p_
             if p not in self.peers:
                 self.peers[p] = Peer(self, p)
                 self.peers[p].start()
@@ -334,6 +350,7 @@ class Manager(threading.Thread):
     def received_transaction(self, inv, tx):
         '''tx is None -> peer failed to deliver the transaction'''
         if tx is not None:
+            self.add_to_inventory(inv, tx)
             self.tx_bloom_filter.add(inv.hash)
             self.spv.on_tx(tx)
 
@@ -349,13 +366,115 @@ class Manager(threading.Thread):
             with self.blockchain_sync_lock:
                 self.headers_request = None
 
-    def received_block(self, inv, block):
+    def received_block(self, inv, block, syncing_blockchain):
+        if not syncing_blockchain:
+            self.add_to_inventory(inv, block)
         self.spv.on_block(block)
         self.spv.blockchain.add_block(block)
 
         with self.inv_lock:
             if inv in self.inprogress_invs:
                 self.inprogress_invs.pop(inv)
+
+    def add_to_inventory(self, inv, item, flags=0):
+        with self.inv_lock:
+            if inv in self.inventory_items:
+                return
+
+            self.inventory.append(inv)
+            self.inventory_items[inv] = {
+                'sent_to'   : set(),
+                'inv_to'    : set(),
+                'data'      : item.serialize(),
+                'time_added': time.time(),
+                'time_check': time.time(),
+                'last_sent' : 0,
+                'flags'     : flags
+            }
+
+            # Transactions that have MUST_CONFIRM set have to be added to our txdb, otherwise
+            # we'll never be able to confirm their depth
+            if (flags & Manager.INVENTORY_FLAG_MUST_CONFIRM) != 0:
+                if not self.spv.txdb.has_tx(inv.hash):
+                    raise Exception("tx must be present in the transaction database in order to check confirmations")
+
+    def get_inventory_data(self, inv):
+        with self.inv_lock:
+            if inv not in self.inventory_items:
+                return None
+            return self.inventory_items[inv]['data']
+
+    def manage_inventory(self):
+        # drop blocks and transactions from self.inventory as necessary
+        now = time.time()
+
+        if now < self.last_manage_inventory_time + Manager.MANAGE_INVENTORY_CHECK_TIME:
+            return
+
+        with self.inv_lock:
+            for _ in range(len(self.inventory)):
+                inv = self.inventory.popleft()
+                item = self.inventory_items.pop(inv)
+
+                if (item['flags'] & Manager.INVENTORY_FLAG_HOLD_FOREVER) == 0:
+                    if inv.type == Inv.MSG_BLOCK:
+                        if (now - item['time_added']) >= Manager.KEEP_BLOCK_IN_INVENTORY_TIME:
+                            continue
+                    elif inv.type == Inv.MSG_TX:
+                        # If this tx is one that we produced, we hold onto it until it has enough confirmations
+                        # If its a relayed transaction, we hold onto it for a period of time or until it's been broadcasted
+                        # through enough peers.
+                        if (item['flags'] & Manager.INVENTORY_FLAG_MUST_CONFIRM) != 0:
+                            if self.spv.get_tx_depth(inv.hash) < self.spv.coin.TRANSACTION_CONFIRMATION_DEPTH:
+                                continue
+
+                            # If we want it confirmed and it was last relayed some time ago, rebroadcast
+                            # by clearing the inv_to and sent_to sets.
+                            if (now - item['last_time']) >= Manager.REBROADCAST_TRANSACTION_TIME:
+                                item['sent_to'] = set()
+                                item['inv_to'] = set()
+                        else:
+                            if (now - item['time_added']) >= Manager.KEEP_TRANSACTION_IN_INVENTORY_TIME:
+                                if len(item['sent_to']) >= min(8, self.peer_goal):
+                                    continue
+
+                item['time_check'] = now
+
+                self.inventory_items[inv] = item
+                self.inventory.append(inv)
+
+        self.last_manage_inventory_time = now
+
+    def inventory_filter(self, peer_address, count=200):
+        with self.inv_lock:
+            r = []
+            for inv in self.inventory:
+                if len(r) == count:
+                    break
+                if peer_address not in self.inventory_items[inv]['inv_to']:
+                    r.append(inv)
+            return r
+
+    def inventory_sent(self, peer_address, invs):
+        with self.inv_lock:
+            for inv in invs:
+                if inv in self.inventory_items:
+                    self.inventory_items[inv]['inv_to'].add(peer_address)
+
+    def will_send_inventory(self, peer_address, inv):
+        now = time.time()
+
+        with self.inv_lock:
+            if inv not in self.inventory_items:
+                return Manager.REQUEST_DONT
+
+            if peer_address in self.inventory_items[inv]:
+                return Manager.REQUEST_DONT
+
+            self.inventory_items[inv]['sent_to'].add(peer_address)
+            self.inventory_items[inv]['last_sent'] = time.time()
+
+            return Manager.REQUEST_GO
 
 ################################################################################
 ################################################################################
@@ -409,6 +528,8 @@ class Peer(threading.Thread):
             self.blocks_request = None
             self.syncing_blockchain = 1
             self.next_sync_time = 0
+            self.last_inventory_check_time = time.time()
+            self.requested_invs = collections.deque()
             if self.make_connection():
                 self.send_version()
                 self.state = 'connected'
@@ -417,6 +538,7 @@ class Peer(threading.Thread):
             self.handle_incoming_data()
             self.handle_initial_blockchain_sync()
             self.handle_invs()
+            self.handle_inventory()
         elif self.state == 'dead':
             self.close_connection()
             self.running = False
@@ -648,6 +770,42 @@ class Peer(threading.Thread):
                 yield inv
             self.send_getdata(invs)
 
+    def handle_inventory(self):
+        now = time.time()
+
+        if len(self.requested_invs):
+            # Queue up an inv if there isn't any other outgoing data
+            if len(self.outgoing_data_queue):
+                return
+
+            for _ in range(len(self.requested_invs)):
+                inv, when = self.requested_invs.popleft()
+                r = self.manager.will_send_inventory(self.peer_address, inv)
+                if r == Manager.REQUEST_GO:
+                    data = self.manager.get_inventory_data(inv)
+                    if data is None:
+                        continue
+                    if inv.type == Inv.MSG_TX:
+                        self.send_tx(inv, data)
+                    elif inv.type == Inv.MSG_BLOCK:
+                        self.send_block(inv, data)
+                    return
+                elif r == Manager.REQUEST_WAIT:
+                    self.requested_invs.append((inv, when + 3))
+                    continue
+                elif r == Manager.REQUEST_DONT:
+                    continue
+                
+        if now < self.last_inventory_check_time:
+            return
+
+        invs = self.manager.inventory_filter(self.peer_address)
+        if len(invs):
+            self.send_inv(invs)
+            self.manager.inventory_sent(self.peer_address, invs)
+
+        self.last_inventory_check_time = now
+
     def send_version(self):
         version  = Manager.PROTOCOL_VERSION
         services = Manager.SERVICES
@@ -669,6 +827,17 @@ class Peer(threading.Thread):
     def send_pong(self, payload):
         self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "pong", payload))
 
+    def send_inv(self, invs):
+        data = []
+        data.append(Serialize.serialize_variable_int(len(invs)))
+        for inv in invs:
+            data.append(inv.serialize())
+
+        payload = b''.join(data)
+        self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "inv", payload))
+        if self.manager.spv.logging_level <= DEBUG:
+            print("[PEER] {} sent inv for {} items".format(self.peer_address, len(invs)))
+        
     def send_getdata(self, invs):
         data = []
         for inv in invs:
@@ -694,6 +863,16 @@ class Peer(threading.Thread):
         self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "getblocks", payload))
         if self.manager.spv.logging_level <= DEBUG:
             print("[PEER] {} sent getblocks".format(self.peer_address))
+
+    def send_tx(self, inv, tx_data):
+        self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "tx", tx_data))
+        if self.manager.spv.logging_level <= DEBUG:
+            print("[PEER] {} sent tx {}".format(self.peer_address, bytes_to_hexstring(inv.hash)))
+
+    def send_block(self, inv, block_data):
+        self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "block", block_data))
+        if self.manager.spv.logging_level <= DEBUG:
+            print("[PEER] {} sent block {}".format(self.peer_address, bytes_to_hexstring(inv.hash)))
 
     def cmd_version(self, payload):
         if len(payload) < 20:
@@ -840,7 +1019,7 @@ class Peer(threading.Thread):
             if self.manager.spv.logging_level <= INFO:
                 print("[PEER] {} got {}".format(self.peer_address, block))
  
-            self.manager.received_block(inv, block)
+            self.manager.received_block(inv, block, self.syncing_blockchain != 0)
             self.inprogress_invs.pop(inv)
             self.last_block_time = time.time()
 
@@ -850,3 +1029,19 @@ class Peer(threading.Thread):
                 self.syncing_blockchain = 2
         else:
             raise Exception("peer sent a block without us asking it to")
+
+    def cmd_getdata(self, payload):
+        count, payload = Serialize.unserialize_variable_int(payload)
+        now = time.time()
+
+        for _ in range(count):
+            inv, payload = Inv.unserialize(payload)
+            self.requested_invs.append((inv, now))
+
+        if self.manager.spv.logging_level <= INFO:
+            print('[PEER] {} requested {} items'.format(self.peer_address, count))
+
+    def cmd_getblocks(self, payload):
+        if self.manager.spv.logging_level <= DEBUG:
+            print('[PEER] {} ignoring getblocks command'.format(self.peer_address))
+
