@@ -71,8 +71,7 @@ def listspends():
 def server_main():
     global spv
 
-    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=8, testnet=True)
-                #listen=('0.0.0.0', 8334),
+    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=0, testnet=True, listen=('0.0.0.0', 8336))
                 #listen=None,
                 #proxy=...,
                 #relay_tx=False,

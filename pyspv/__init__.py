@@ -45,7 +45,7 @@ class pyspv:
             self.on_block_added   = on_block_added
             self.on_block_removed = on_block_removed
 
-    def __init__(self, app_name, testnet=False, peer_goal=8, logging_level=WARNING, on_tx=None, on_block=None, on_block_added=None, on_block_removed=None):
+    def __init__(self, app_name, testnet=False, peer_goal=8, logging_level=WARNING, on_tx=None, on_block=None, on_block_added=None, on_block_removed=None, listen=('', 0)):
         self.app_name = app_name
         self.time_offset = 0
         self.logging_level = logging_level
@@ -67,7 +67,7 @@ class pyspv:
 
         self.wallet = wallet.Wallet(spv=self, monitors=[PubKeyPaymentMonitor])
 
-        self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, callbacks=self.callbacks)
+        self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, callbacks=self.callbacks, listen=listen)
         self.network_manager.start()
 
     def shutdown(self):

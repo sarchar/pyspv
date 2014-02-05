@@ -51,7 +51,7 @@ class Manager(threading.Thread):
     INVENTORY_FLAG_HOLD_FOREVER = 0x01
     INVENTORY_FLAG_MUST_CONFIRM = 0x02
 
-    def __init__(self, spv=None, callbacks=None, peer_goal=1):
+    def __init__(self, spv=None, callbacks=None, peer_goal=1, listen=('', 0)):
         threading.Thread.__init__(self)
         self.spv = spv
         self.callbacks = callbacks
@@ -75,6 +75,13 @@ class Manager(threading.Thread):
         self.headers_request = None
         self.headers_request_last_peer = None
 
+        if listen is not None:
+            if listen[0] == '':
+                listen = ('0.0.0.0', listen[1])
+            if listen[1] == 0:
+                listen = (listen[0], self.spv.coin.DEFAULT_PORT)
+
+        self.listen_address = listen
 
     def start(self):
         self.running = False
@@ -118,12 +125,15 @@ class Manager(threading.Thread):
         if self.spv.logging_level <= DEBUG:
             print("[NETWORK] starting")
 
+        self.start_listening()
+
         while self.running:
             now = time.time()
 
             if len(self.peer_addresses) < 5:
                 self.get_new_addresses_from_peer_sources()
 
+            self.check_for_incoming_connections()
             self.check_for_dead_peers()
             self.check_for_new_peers()
             self.manage_inventory()
@@ -142,6 +152,9 @@ class Manager(threading.Thread):
         if self.spv.logging_level <= DEBUG:
             print("[NETWORK] stopping")
 
+        if self.listen_socket is not None:
+            self.listen_socket.close()
+
     def get_new_addresses_from_peer_sources(self):
         for seed in self.spv.coin.SEEDS:
             for _, _, _, _, ipport in socket.getaddrinfo(seed, None):
@@ -152,7 +165,7 @@ class Manager(threading.Thread):
 
     def add_peer_address(self, peer_address):
         if peer_address in self.peer_addresses:
-            return
+            return True
 
         try:
             ipaddress.IPv4Address(peer_address[0]).packed
@@ -160,7 +173,7 @@ class Manager(threading.Thread):
             # peer_address[0] is probably an IPv6 address
             if self.spv.logging_level <= INFO:
                 print("[NETWORK] peer address {} is not valid IPv4".format(peer_address[0]))
-            return
+            return False
 
         if self.spv.logging_level <= DEBUG:
             print("[NETWORK] new peer found", peer_address)
@@ -173,6 +186,7 @@ class Manager(threading.Thread):
         self.update_peer_address(peer_address)
 
         self.peer_index += 1
+        return True
 
     def update_peer_address(self, peer_address):
         if peer_address not in self.peer_addresses:
@@ -227,6 +241,36 @@ class Manager(threading.Thread):
                 print("[NETWORK] {} peer addresses loaded".format(len(self.peer_addresses)))
         except FileNotFoundError:
             pass
+
+    def start_listening(self):
+        self.listen_socket = None
+
+        if self.listen_address is None:
+            return
+
+        self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listen_socket.bind(self.listen_address)
+        self.listen_socket.setblocking(False)
+        self.listen_socket.listen(5)
+
+    def check_for_incoming_connections(self):
+        if self.listen_socket is None:
+            return
+
+        try:
+            sock, peer_address = self.listen_socket.accept()
+        except (socket.timeout, BlockingIOError):
+            return
+
+        if self.spv.logging_level <= DEBUG:
+            print('[MANAGER] incoming connection from {}'.format(peer_address))
+
+        if not self.add_peer_address(peer_address):
+            sock.close()
+            return
+
+        self.peers[peer_address] = Peer(self, peer_address, sock)
+        self.peers[peer_address].start()
 
     def check_for_dead_peers(self):
         dead_peers = set()
@@ -482,10 +526,11 @@ class Manager(threading.Thread):
 class Peer(threading.Thread):
     MAX_INVS_IN_PROGRESS = 10
 
-    def __init__(self, manager, peer_address):
+    def __init__(self, manager, peer_address, sock=None):
         threading.Thread.__init__(self)
         self.manager = manager
         self.peer_address = peer_address
+        self.socket = sock
 
     def shutdown(self):
         self.running = False
@@ -513,7 +558,7 @@ class Peer(threading.Thread):
 
     def step(self):
         if self.state == 'init':
-            self.socket = None
+            self.sent_version = False
             self.data_buffer = bytes()
             self.bytes_sent = 0
             self.bytes_received = 0
@@ -531,8 +576,12 @@ class Peer(threading.Thread):
             self.next_sync_time = 0
             self.last_inventory_check_time = time.time()
             self.requested_invs = collections.deque()
-            if self.make_connection():
-                self.send_version()
+            if self.socket is None:
+                if self.make_connection():
+                    self.send_version()
+                    self.state = 'connected'
+            else:
+                self.socket.settimeout(0.1)
                 self.state = 'connected'
         elif self.state == 'connected':
             self.handle_outgoing_data()
@@ -808,6 +857,7 @@ class Peer(threading.Thread):
         self.last_inventory_check_time = now
 
     def send_version(self):
+        assert not self.sent_version, "don't call this twice"
         version  = Manager.PROTOCOL_VERSION
         services = Manager.SERVICES
         now      = int(time.time())
@@ -821,6 +871,7 @@ class Peer(threading.Thread):
 
         payload = struct.pack("<LQQ", version, services, now) + recipient_address + sender_address + struct.pack("<Q", nonce) + user_agent + struct.pack("<L", last_block)
         self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "version", payload))
+        self.sent_version = True
 
     def send_verack(self):
         self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "verack", b''))
@@ -875,6 +926,16 @@ class Peer(threading.Thread):
         if self.manager.spv.logging_level <= DEBUG:
             print("[PEER] {} sent block {}".format(self.peer_address, bytes_to_hexstring(inv.hash)))
 
+    def send_addr(self, addresses):
+        data = []
+        for address in addresses:
+            data.append(Serialize.serialize_network_address(address, Manager.SERVICES, with_timestamp=False))
+
+        payload = Serialize.serialize_variable_int(len(addresses)) + b''.join(data)
+        self.queue_outgoing_data(Serialize.wrap_network_message(self.manager.spv.coin, "addr", payload))
+        if self.manager.spv.logging_level <= DEBUG:
+            print("[PEER] {} sent addr for {} addresses".format(self.peer_address, len(addresses)))
+        
     def cmd_version(self, payload):
         if len(payload) < 20:
             if self.manager.spv.logging_level <= WARNING:
@@ -920,6 +981,9 @@ class Peer(threading.Thread):
 
         self.send_verack()
         self.peer_verack += 1
+
+        if not self.sent_version:
+            self.send_version()
 
         if self.peer_verack == 2:
             self.manager.spv.add_time_data(self.peer_time)
@@ -1045,4 +1109,11 @@ class Peer(threading.Thread):
     def cmd_getblocks(self, payload):
         if self.manager.spv.logging_level <= DEBUG:
             print('[PEER] {} ignoring getblocks command'.format(self.peer_address))
+
+    def cmd_getaddr(self, payload):
+        # Select random addresses and send them
+        peer_addresses = list(self.manager.peer_addresses.keys())
+        random.shuffle(peer_addresses)
+        peer_addresses = peer_addresses[:10]
+        self.send_addr(peer_addresses)
 
