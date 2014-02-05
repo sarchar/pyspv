@@ -42,7 +42,7 @@ class Manager(threading.Thread):
 
     MAX_MESSAGE_SIZE = 2*1024*1024
 
-    INVENTORY_CHECK_TIME = 1
+    INVENTORY_CHECK_TIME = 3
     MANAGE_INVENTORY_CHECK_TIME = 60
     KEEP_BLOCK_IN_INVENTORY_TIME = 120*60
     KEEP_TRANSACTION_IN_INVENTORY_TIME = 30*60
@@ -51,15 +51,14 @@ class Manager(threading.Thread):
     INVENTORY_FLAG_HOLD_FOREVER = 0x01
     INVENTORY_FLAG_MUST_CONFIRM = 0x02
 
-    def __init__(self, spv=None, callbacks=None, peer_goal=1, listen=('', 0)):
+    def __init__(self, spv=None, peer_goal=1, listen=('', 0)):
         threading.Thread.__init__(self)
         self.spv = spv
-        self.callbacks = callbacks
         self.peer_goal = peer_goal
 
         self.peers = {}
         self.peer_addresses_db_file = self.spv.config.get_file("addresses.dat")
-        self.peer_lock = threading.Lock()
+        self.peer_address_lock = threading.Lock()
         self.load_peer_addresses()
 
         self.inv_lock = threading.Lock()
@@ -318,18 +317,18 @@ class Manager(threading.Thread):
             raise OutOfPeers()
 
     def peer_is_bad(self, peer_address):
-        with self.peer_lock:
+        with self.peer_address_lock:
             self.delete_peer_address(peer_address)
 
     def peer_is_good(self, peer_address):
         p = self.peer_addresses.get(peer_address, None)
         if p is not None:
             p['last_successful_connection_time'] = time.time()
-            with self.peer_lock:
+            with self.peer_address_lock:
                 self.update_peer_address(peer_address)
 
     def peer_found(self, peer_address):
-        with self.peer_lock:
+        with self.peer_address_lock:
             self.add_peer_address(peer_address)
 
     def will_request_inv(self, inv):
@@ -846,7 +845,7 @@ class Peer(threading.Thread):
                 elif r == Manager.REQUEST_DONT:
                     continue
                 
-        if now < self.last_inventory_check_time:
+        if now < (self.last_inventory_check_time + Manager.INVENTORY_CHECK_TIME):
             return
 
         invs = self.manager.inventory_filter(self.peer_address)

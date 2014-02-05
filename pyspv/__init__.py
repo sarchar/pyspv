@@ -5,15 +5,18 @@ from . import blockchain
 from . import inv
 from . import keys
 from . import network
+from . import transaction
 from . import txdb
 from . import wallet
 
 from .bitcoin import *
-from .transaction import Transaction, TransactionInput, TransactionOutput, TransactionPrevOut
-from .util import *
+
 from .monitors.pubkey import PubKeyTransactionBuilder, PubKeyPaymentMonitor
 
+from .util import *
+
 VERSION = 'pyspv 0.0.1-alpha1'
+VERSION_NUMBER = 0x00000101
 
 class pyspv:
     class config:
@@ -38,23 +41,15 @@ class pyspv:
         def get_file(self, f):
             return os.sep.join([self.path, f])
 
-    class callbacks:
-        def __init__(self, on_tx=None, on_block=None, on_block_added=None, on_block_removed=None):
-            self.on_tx            = on_tx
-            self.on_block         = on_block
-            self.on_block_added   = on_block_added
-            self.on_block_removed = on_block_removed
-
-    def __init__(self, app_name, testnet=False, peer_goal=8, logging_level=WARNING, on_tx=None, on_block=None, on_block_added=None, on_block_removed=None, listen=('', 0)):
+    def __init__(self, app_name, testnet=False, peer_goal=8, logging_level=WARNING, listen=('', 0), coin=Bitcoin):
         self.app_name = app_name
         self.time_offset = 0
         self.logging_level = logging_level
         self.testnet = testnet
         self.time_samples = []
 
-        self.coin = BitcoinTestnet if testnet else Bitcoin
+        self.coin = coin.Testnet if testnet else coin
 
-        self.callbacks = pyspv.callbacks(on_tx=on_tx, on_block=on_block, on_block_added=on_block_added, on_block_removed=on_block_removed)
         self.config = pyspv.config(app_name, testnet=testnet)
 
         if self.logging_level <= DEBUG:
@@ -67,7 +62,7 @@ class pyspv:
 
         self.wallet = wallet.Wallet(spv=self, monitors=[PubKeyPaymentMonitor])
 
-        self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, callbacks=self.callbacks, listen=listen)
+        self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, listen=listen)
         self.network_manager.start()
 
     def shutdown(self):
@@ -106,17 +101,9 @@ class pyspv:
         self.network_manager.add_to_inventory(tx_inv, tx, network.Manager.INVENTORY_FLAG_MUST_CONFIRM if must_confirm else 0)
 
     def on_tx(self, tx):
-        if self.callbacks is not None and self.callbacks.on_tx is not None:
-            if self.callbacks.on_tx(tx):
-                return
-
         self.wallet.on_tx(tx)
 
     def on_block(self, block):
-        if self.callbacks is not None and self.callbacks.on_block is not None:
-            if self.callbacks.on_block(block):
-                return
-
         block_hash = block.header.hash()
         for tx in block.transactions:
             # Calling on_tx allows the wallet to process the transaction and eventually call txdb.save_tx so
@@ -125,19 +112,10 @@ class pyspv:
             self.txdb.bind_tx(tx.hash(), block_hash)
 
     def on_block_added(self, block_hash):
-        if self.callbacks is not None and self.callbacks.on_block_added is not None:
-            if self.callbacks.on_block_added(block_hash):
-                return
-
         self.txdb.on_block_added(block_hash)
         # block_link = self.blockchain.blocks[block_hash] ...
 
     def on_block_removed(self, block_hash):
-        if self.callbacks is not None and self.callbacks.on_block_removed is not None:
-            if self.callbacks.on_block_removed(block_hash):
-                return
-
         self.txdb.on_block_removed(block_hash)
-        block_link = self.blockchain.blocks[block_hash]
-        # TODO confirmations
+        # block_link = self.blockchain.blocks[block_hash]
 

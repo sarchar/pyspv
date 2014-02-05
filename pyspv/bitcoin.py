@@ -160,3 +160,5 @@ class BitcoinTestnet(Bitcoin):
     CHECKPOINT_BLOCK_TIMESTAMP = 1386677918
     CHECKPOINT_BLOCK_BITS      = 0x1B05B143
 
+Bitcoin.Testnet = BitcoinTestnet
+
