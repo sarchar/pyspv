@@ -71,7 +71,7 @@ def listspends():
 def server_main():
     global spv
 
-    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=8, testnet=False, listen=('0.0.0.0', 8336))
+    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=0, testnet=True, listen=('0.0.0.0', 8336))
                 #listen=None,
                 #proxy=...,
                 #relay_tx=False,
@@ -101,7 +101,7 @@ def rpc_call():
         print(json.dumps(response))
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
+    if len(sys.argv) == 1 or all(x.startswith('-') for x in sys.argv[1:]):
         try:
             server_main()
         except:

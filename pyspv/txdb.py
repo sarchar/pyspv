@@ -1,3 +1,4 @@
+import os
 import shelve
 import threading
 
@@ -14,6 +15,15 @@ class TransactionDatabase:
         self.transaction_cache = {}
 
         self.blockchain_height = self.spv.blockchain.best_chain['height']
+
+        if self.spv.args.resync:
+            try:
+                os.unlink(self.transaction_database_file)
+            except FileNotFoundError:
+                pass
+            except:
+                print('Error: cannot remove txdb file for resync')
+                raise
 
         with closing(shelve.open(self.transaction_database_file)) as txdb:
             for tx_hash_str in txdb.keys():

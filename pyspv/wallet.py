@@ -39,7 +39,7 @@ class Wallet:
                 if 'creation_time' not in d:
                     d['creation_time'] = time.time()
 
-                if 'spends' not in d or isinstance(d['spends'], list):
+                if 'spends' not in d or isinstance(d['spends'], list) or self.spv.args.resync:
                     d['spends'] = {}
 
                 # TODO - delete this code after saving old keys

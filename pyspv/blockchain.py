@@ -1,4 +1,5 @@
 import collections
+import os
 import shelve
 import threading
 import time
@@ -33,6 +34,15 @@ class Blockchain:
         self.best_chain = checkpoint
 
         self.unknown_referenced_blocks = collections.defaultdict(set)
+
+        if self.spv.args.resync:
+            try:
+                os.unlink(self.blockchain_db_file)
+            except FileNotFoundError:
+                pass
+            except:
+                print('Error: cannot remove blockchain file for resync')
+                raise
 
         with self.blockchain_lock:
             with closing(shelve.open(self.blockchain_db_file)) as db:

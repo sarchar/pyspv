@@ -1,4 +1,6 @@
+import argparse
 import os
+import sys
 import time
 
 from . import blockchain
@@ -48,6 +50,12 @@ class pyspv:
         self.testnet = testnet
         self.time_samples = []
 
+        # Command-line arguments can override constructor args
+        self.args = self.parse_arguments()
+
+        if self.args.testnet:
+            testnet = True
+
         self.coin = coin.Testnet if testnet else coin
 
         self.config = pyspv.config(app_name, testnet=testnet)
@@ -64,6 +72,14 @@ class pyspv:
 
         self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, listen=listen)
         self.network_manager.start()
+
+    def parse_arguments(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--resync', action='store_const', default=False, const=True)
+        parser.add_argument('--testnet', action='store_const', default=False, const=True)
+        args, remaining = parser.parse_known_args()
+        sys.argv = [sys.argv[0]] + remaining
+        return args
 
     def shutdown(self):
         self.network_manager.shutdown()
