@@ -13,6 +13,7 @@ NID_secp256k1 = 714
 
 class PublicKey:
     def __init__(self, pubkey):
+        assert len(pubkey) in (33, 65) and pubkey[0] in (0x02, 0x03, 0x04)
         self.pubkey = pubkey
 
     def __hash__(self):
@@ -20,6 +21,9 @@ class PublicKey:
 
     def __eq__(self, other):
         return self is other or (self.pubkey == other.pubkey)
+
+    def __lt__(self, other):
+        return self.pubkey < other.pubkey
 
     def is_compressed(self):
         return self.pubkey[0] in (0x02, 0x03) and len(self.pubkey) == 33

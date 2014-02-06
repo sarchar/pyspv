@@ -44,6 +44,14 @@ class Script:
     def push_op(self, op):
         self.program = self.program + bytes([op])
 
+    def push_int(self, v):
+        if v == 0:
+            self.program = self.program + bytes([0])
+        elif v >= 1 and v <= 16:
+            self.program = self.program + bytes([v + 80])
+        else:
+            raise Exception("invalid int")
+
     def push_bytes(self, data):
         assert isinstance(data, bytes)
 

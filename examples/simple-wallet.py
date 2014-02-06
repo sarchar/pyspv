@@ -103,10 +103,47 @@ def dumpprivkey(address_or_pubkey):
         return 'error: unknown key'
     return metadata['private_key'].as_wif(spv.coin, public_key.is_compressed())
 
+@exception_printer
+def genmultisig(nreq, *pubkeys):
+    nreq = int(nreq)
+    assert 1 <= nreq <= len(pubkeys)
+
+    pubkeys = [pyspv.keys.PublicKey.from_hex(pubkey) for pubkey in pubkeys]
+    pubkeys.sort()
+
+    # build the M-of-N multisig redemption script and add it to the wallet
+    # (the p2sh monitor will notice that we added a redemption script to the 
+    # wallet and start watching for transactions to it
+
+    script = pyspv.script.Script()
+    script.push_int(nreq)
+
+    for pubkey in pubkeys:
+        script.push_bytes(pubkey.pubkey)
+
+    script.push_int(len(pubkeys))
+    script.push_op(pyspv.script.OP_CHECKMULTISIG)
+
+    redemption_script = script.program
+    address = pyspv.base58_check(spv.coin, spv.coin.hash160(redemption_script), version_bytes=spv.coin.P2SH_ADDRESS_VERSION_BYTES)
+
+    try:
+        spv.wallet.add('redemption_script', redemption_script, {})
+    except pyspv.wallet.DuplicateWalletItem:
+        # No worries, we already have this redemption script
+        pass
+
+    return {
+        'address': address,
+        'redemption_script': pyspv.bytes_to_hexstring(redemption_script, reverse=False),
+        'pubkeys': [ pubkey.as_hex() for pubkey in pubkeys ],
+        'nreq': nreq,
+    }
+
 def server_main():
     global spv
 
-    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=4, testnet=True, listen=('0.0.0.0', 8336))
+    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=0, testnet=True, listen=('0.0.0.0', 8336))
                 #listen=None,
                 #proxy=...,
                 #relay_tx=False,
@@ -119,6 +156,7 @@ def server_main():
     rpc_server.register_function(listspends)
     rpc_server.register_function(dumppubkey)
     rpc_server.register_function(dumpprivkey)
+    rpc_server.register_function(genmultisig)
 
     try:
         rpc_server.serve_forever()

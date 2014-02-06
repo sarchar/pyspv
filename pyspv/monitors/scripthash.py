@@ -1,5 +1,7 @@
 from .. import base58
 
+from .basemonitor import BaseMonitor
+
 from ..script import *
 from ..transaction import TransactionOutput
 from ..util import *
@@ -30,4 +32,17 @@ class ScriptHashPayment:
 
         yield TransactionOutput(amount=self.amount, script=script)
 
+class ScriptHashPaymentMonitor(BaseMonitor):
+    spend_classes = []
+
+    def __init__(self, spv):
+        BaseMonitor.__init__(self, spv)
+
+    def on_spend(self, wallet, spend):
+        # TODO
+        pass
+
+    def on_redemption_script(self, wallet, redemption_script, metadata):
+        address = base58_check(self.spv.coin, self.spv.coin.hash160(redemption_script), version_bytes=self.spv.coin.P2SH_ADDRESS_VERSION_BYTES)
+        print('[SCRIPTHASHPAYMENTS] watching for script-hash payment to {}'.format(address))
 
