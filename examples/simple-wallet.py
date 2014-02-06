@@ -80,6 +80,29 @@ def listspends():
     s = [str(spend['spend']) for spend in spv.wallet.spends.values()]
     return '\n'.join(s)
 
+@exception_printer
+def dumppubkey(address):
+    '''PubKeyPaymentMonitor has to be included for this to work'''
+    metadata = spv.wallet.get_temp('address', address)
+    if metadata is None:
+        return 'error: unknown address'
+
+    return metadata['public_key'].as_hex()
+
+@exception_printer
+def dumpprivkey(address_or_pubkey):
+    '''PubKeyPaymentMonitor has to be included for this to work'''
+    metadata = spv.wallet.get_temp('address', address_or_pubkey)
+    if metadata is not None:
+        public_key = metadata['public_key']
+    else:
+        public_key = pyspv.keys.PublicKey.from_hex(address_or_pubkey)
+
+    metadata = spv.wallet.get_temp('public_key', public_key)
+    if metadata is None:
+        return 'error: unknown key'
+    return metadata['private_key'].as_wif(spv.coin, public_key.is_compressed())
+
 def server_main():
     global spv
 
@@ -94,6 +117,8 @@ def server_main():
     rpc_server.register_function(sendtoaddress)
     rpc_server.register_function(getinfo)
     rpc_server.register_function(listspends)
+    rpc_server.register_function(dumppubkey)
+    rpc_server.register_function(dumpprivkey)
 
     try:
         rpc_server.serve_forever()

@@ -174,6 +174,7 @@ class PubKeyPaymentMonitor(BaseMonitor):
         }
 
         wallet.add_temp('public_key', public_key, {'private_key': private_key})
+        wallet.add_temp('address', address, {'public_key': public_key})
 
         if self.spv.logging_level <= DEBUG:
             print('[PUBKEYPAYMENTS] watching for payments to {}'.format(address))
@@ -187,6 +188,7 @@ class PubKeyPaymentMonitor(BaseMonitor):
         }
 
         wallet.add_temp('public_key', public_key, {'private_key': private_key})
+        wallet.add_temp('address', address, {'public_key': public_key})
 
         if self.spv.logging_level <= DEBUG:
             print('[PUBKEYPAYMENTS] watching for payments to {}'.format(address))
