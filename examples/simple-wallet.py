@@ -39,23 +39,30 @@ def getinfo():
 
 @exception_printer
 def sendtoaddress(address, amount, memo=''):
-    address_bytes = int.to_bytes(pyspv.base58.decode(address), spv.coin.ADDRESS_BYTE_LENGTH, 'big')
+    transaction_builder = spv.new_transaction_builder(memo=memo)
+    transaction_builder.process_change(pyspv.PubKeyChange)
 
+    # Determine the payment type based on the version byte of the address provided
+    # (I don't think this is the proper long term solution to different payment types...)
+    address_bytes = int.to_bytes(pyspv.base58.decode(address), spv.coin.ADDRESS_BYTE_LENGTH, 'big')
     k = len(spv.coin.ADDRESS_VERSION_BYTES)
     if address_bytes[:k] == spv.coin.ADDRESS_VERSION_BYTES:
-        transaction_builder = spv.new_transaction_builder(memo=memo)
         transaction_builder.process(pyspv.PubKeyPayment(address, spv.coin.parse_money(amount)))
-        transaction_builder.process_change(pyspv.PubKeyChange)
-        tx = transaction_builder.finish(shuffle_inputs=True, shuffle_outputs=True)
+    else:
+        k = len(spv.coin.P2SH_ADDRESS_VERSION_BYTES)
+        if address_bytes[:k] == spv.coin.P2SH_ADDRESS_VERSION_BYTES:
+            transaction_builder.process(pyspv.ScriptHashPayment(address, spv.coin.parse_money(amount)))
+        else:
+            return "error: bad address {}".format(address)
 
-        if not tx.verify_scripts():
-            raise Exception("internal error building transaction")
+    tx = transaction_builder.finish(shuffle_inputs=True, shuffle_outputs=True)
 
-        spv.broadcast_transaction(tx)
+    if not tx.verify_scripts():
+        raise Exception("internal error building transaction")
 
-        return pyspv.bytes_to_hexstring(tx.hash())
+    spv.broadcast_transaction(tx)
 
-    return "error: bad address {}".format(address)
+    return pyspv.bytes_to_hexstring(tx.hash())
 
 @exception_printer
 def getbalance():
