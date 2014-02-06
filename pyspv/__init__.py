@@ -8,12 +8,13 @@ from . import inv
 from . import keys
 from . import network
 from . import transaction
+from . import transactionbuilder
 from . import txdb
 from . import wallet
 
 from .bitcoin import *
 
-from .monitors.pubkey import PubKeyTransactionBuilder, PubKeyPaymentMonitor
+from .monitors.pubkey import PubKeyPayment, PubKeyChange, PubKeyPaymentMonitor
 
 from .util import *
 
@@ -103,6 +104,9 @@ class pyspv:
             else:
                 # TODO - we should inform the app that we can't get good time data
                 self.time_offset = 0
+
+    def new_transaction_builder(self, memo=''):
+        return transactionbuilder.TransactionBuilder(self, memo=memo)
 
     def broadcast_transaction(self, tx, must_confirm=False):
         # Let wallet see the tx...

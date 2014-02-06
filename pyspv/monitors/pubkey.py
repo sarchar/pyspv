@@ -11,20 +11,21 @@ from ..wallet import InvalidAddress, Spend
 from ..script import *
 from ..util import *
 
-class PubKeyTransactionBuilder(TransactionBuilder):
-    def __init__(self, *args, **kwargs):
-        TransactionBuilder.__init__(self, *args, **kwargs)
-        
-    def add_recipient(self, address, amount):
+class PubKeyPayment:
+    def __init__(self, address, amount):
         assert isinstance(amount, int), "amount must be in satoshis"
-        coin = self.wallet.spv.coin
+        assert isinstance(address, str), "address must be a string"
 
-        address_bytes = int.to_bytes(base58.decode(address), coin.ADDRESS_BYTE_LENGTH, 'big')
-        k = len(coin.ADDRESS_VERSION_BYTES)
-        if address_bytes[:k] != coin.ADDRESS_VERSION_BYTES:
+        self.address = address
+        self.amount = amount
+        
+    def create_outputs(self, spv):
+        address_bytes = int.to_bytes(base58.decode(self.address), spv.coin.ADDRESS_BYTE_LENGTH, 'big')
+        k = len(spv.coin.ADDRESS_VERSION_BYTES)
+        if address_bytes[:k] != spv.coin.ADDRESS_VERSION_BYTES:
             raise InvalidAddress("Address version is incorrect")
 
-        address_hash = coin.hash(address_bytes[:-4])
+        address_hash = spv.coin.hash(address_bytes[:-4])
         if address_hash[:4] != address_bytes[-4:]:
             raise InvalidAddress("Address checksum is incorrect")
 
@@ -35,26 +36,31 @@ class PubKeyTransactionBuilder(TransactionBuilder):
         script.push_op(OP_EQUALVERIFY)
         script.push_op(OP_CHECKSIG)
 
-        self.add_output(amount=amount, script=script)
+        yield TransactionOutput(amount=self.amount, script=script)
 
-    def create_change_script(self):
+class PubKeyChange:
+    def __init__(self):
+        pass
+
+    def create_one(self, spv):
         change_private_key = PrivateKey.create_new()
-        change_address = change_private_key.get_public_key(True).as_hash160(self.wallet.spv.coin)
+        change_address = change_private_key.get_public_key(True).as_hash160(spv.coin)
 
-        change_script = Script()
-        change_script.push_op(OP_DUP)
-        change_script.push_op(OP_HASH160)
-        change_script.push_bytes(change_address)
-        change_script.push_op(OP_EQUALVERIFY)
-        change_script.push_op(OP_CHECKSIG)
+        script = Script()
+        script.push_op(OP_DUP)
+        script.push_op(OP_HASH160)
+        script.push_bytes(change_address)
+        script.push_op(OP_EQUALVERIFY)
+        script.push_op(OP_CHECKSIG)
 
-        return change_private_key, change_script
+        spv.wallet.add('private_key', change_private_key, {'label': ''})
+        return TransactionOutput(amount=0, script=script)
 
 class PubKeySpendInputCreator:
     '''Input creators need to define the following class values:
         self.prevout : a TransactionPrevOut
-        self.script  : a byte sequence for scriptPubKey
-        self.sequence: the input sequence number
+        self.script  : a byte sequence containing scriptPubKey
+        self.sequence: the sequence number of the final TransactionInput
 
         Everything else can be class-specific, but the above are used for serialization and signing
     '''

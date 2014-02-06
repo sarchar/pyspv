@@ -26,13 +26,16 @@ class TransactionDatabase:
                 raise
 
         with closing(shelve.open(self.transaction_database_file)) as txdb:
-            for tx_hash_str in txdb.keys():
+            for tx_hash_str in list(txdb.keys()):
                 if tx_hash_str.startswith('tx-'):
-                    self.transaction_cache[hexstring_to_bytes(tx_hash_str[3:])] = {
-                        'in_blocks': txdb[tx_hash_str]['in_blocks'],
-                    }
+                    if self.spv.args.resync:
+                        txdb.pop(tx_hash_str)
+                    else:
+                        self.transaction_cache[hexstring_to_bytes(tx_hash_str[3:])] = {
+                            'in_blocks': txdb[tx_hash_str]['in_blocks'],
+                        }
 
-            if 'watched_block_height' not in txdb:
+            if 'watched_block_height' not in txdb or self.spv.args.resync:
                 txdb['watched_block_height'] = {}
 
             self.watched_block_height = txdb['watched_block_height']

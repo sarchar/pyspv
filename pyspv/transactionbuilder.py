@@ -10,41 +10,55 @@ class InsufficientInputs(Exception):
     pass
 
 class TransactionBuilder:
-    def __init__(self, wallet, memo=''):
-        self.wallet = wallet
+    def __init__(self, spv, memo=''):
+        self.spv = spv
         self.memo = memo
         self.inputs = []
         self.outputs = []
 
-    def add_output(self, amount, script):
-        assert isinstance(amount, int)
-        assert isinstance(script, Script)
-        self.outputs.append(
-            TransactionOutput(
-                amount=amount,
-                script=script
-            )
-        )
+    def process(self, output_producer):
+        output_set = []
+        for output in output_producer.create_outputs(self.spv):
+            assert isinstance(output, TransactionOutput)
+            output_set.append(output)
+        self.outputs.append((False, output_set))
 
+    def process_change(self, change_class):
+        self.outputs.append((True, change_class))
+        
     def __unsigned_inputs_from_spends(self, spends):
         inputs = []
         for spend in spends:
-            for input_creator in spend.create_input_creators(self.wallet.spv):
+            for input_creator in spend.create_input_creators(self.spv):
                 inputs.append(UnsignedTransactionInput(input_creator))
         return inputs
 
     def finish(self, shuffle_inputs, shuffle_outputs, lock_time=0):
         spends = []
 
-        # add zero-valued change address(es)
-        change_private_key, change_script = self.create_change_script()
-        change_output = TransactionOutput(amount=0, script=change_script)
+        if shuffle_outputs:
+            random.shuffle(self.outputs)
+
+        outputs = []
+        change_outputs = []
+        for is_change, output_set in self.outputs:
+            if not is_change:
+                outputs = outputs + output_set
+                continue
+
+            # All change outputs start at 0
+            change_output = output_set().create_one(self.spv)
+            change_output.amount = 0
+            change_outputs.append(change_output)
+            outputs.append(change_output)
+
+        assert len(change_outputs) == 1 # right now only 1 change address supported
 
         # determine the total inputs and outputs
         while True:
             total_input = sum(spend.amount for spend in spends)
-            total_output = sum(output.amount for output in self.outputs)
-            tx = Transaction(self.wallet.spv.coin, inputs=self.__unsigned_inputs_from_spends(spends), outputs=self.outputs + [change_output], lock_time=lock_time)
+            total_output = sum(output.amount for output in outputs)
+            tx = Transaction(self.spv.coin, inputs=self.__unsigned_inputs_from_spends(spends), outputs=outputs, lock_time=lock_time)
 
             # recompute recommended fee based on different inputs
             try:
@@ -53,51 +67,43 @@ class TransactionBuilder:
                 # TODO - ask user if they want to proceed anyway
                 raise
 
-            if self.wallet.spv.logging_level <= DEBUG:
-                print("[PAYMENTBUILDER] recommended fee is {}".format(self.wallet.spv.coin.format_money(recommended_fee)))
+            if self.spv.logging_level <= DEBUG:
+                print("[PAYMENTBUILDER] recommended fee is {}".format(self.spv.coin.format_money(recommended_fee)))
 
             # if selected inputs are smaller than output + new recommended fee, try selecting inputs again with new recommended fee
             if total_input < total_output + recommended_fee:
-                spends = self.wallet.select_spends(set(['default']), total_output + recommended_fee)
+                spends = self.spv.wallet.select_spends(set(['default']), total_output + recommended_fee)
                 if len(spends) == 0:
                     raise InsufficientInputs()
                 continue
-            # if selected inputs cover output + new recommended fee exactly, remove zero-valued outputs and break
+            # if selected inputs cover output + new recommended fee exactly, remove change outputs and break
             elif total_input == total_output + recommended_fee:
                 # drop change outputs
-                change_output = None
-                tx = Transaction(self.wallet.spv.coin, inputs=tx.inputs, outputs=self.outputs, lock_time=lock_time)
+                outputs = list(filter(lambda t: t not in change_outputs, outputs))
+                tx = Transaction(self.spv.coin, inputs=tx.inputs, outputs=outputs, lock_time=lock_time)
                 # TODO technically this removes outputs, reducing the size of the tx, possibly reducing the tx fee.  unless there are thousands of
                 # change outputs, it's unlikely removing change outputs is going to reduce the fee by much or at all.
                 break
             # if selected inputs are larger than output + new recommended fee, distribute change to change addresses (randomly or evenly?)
             elif total_input > total_output + recommended_fee:
                 diff = total_input - (total_output + recommended_fee)
-                change_output.amount = diff
+                change_outputs[0].amount = diff
                 break
 
         # final output 
         total_output = sum(output.amount for output in tx.outputs)
         fee = total_output - total_input
-        assert fee < self.wallet.spv.coin.MAXIMUM_TRANSACTION_FEE # TODO - temporary safety measure?
+        assert fee < self.spv.coin.MAXIMUM_TRANSACTION_FEE # TODO - temporary safety measure?
 
         # randomize inputs
         if shuffle_inputs:
             random.shuffle(tx.inputs)
 
-        # randomize outputs
-        if shuffle_outputs:
-            random.shuffle(tx.outputs)
-
         # sign inputs
         for i, signable_tx_inputs in enumerate(list(tx.inputs)):
-            if self.wallet.spv.logging_level <= DEBUG:
+            if self.spv.logging_level <= DEBUG:
                 print("[PAYMENTBUILDER] signing input {}".format(i))
             tx.inputs[i] = signable_tx_inputs.sign(tx, i, Transaction.SIGHASH_ALL)
-
-        # save the change output
-        if change_output is not None:
-            self.wallet.add('private_key', change_private_key, {'label': ''})
 
         # return final transaction
         return tx

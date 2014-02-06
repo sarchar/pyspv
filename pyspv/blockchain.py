@@ -35,21 +35,12 @@ class Blockchain:
 
         self.unknown_referenced_blocks = collections.defaultdict(set)
 
-        if self.spv.args.resync:
-            try:
-                os.unlink(self.blockchain_db_file)
-            except FileNotFoundError:
-                pass
-            except:
-                print('Error: cannot remove blockchain file for resync')
-                raise
-
         with self.blockchain_lock:
             with closing(shelve.open(self.blockchain_db_file)) as db:
-                if 'needs_headers' not in db:
+                if 'needs_headers' not in db or self.spv.args.resync:
                     db['needs_headers'] = True
 
-                if 'blockchain' not in db:
+                if 'blockchain' not in db or self.spv.args.resync:
                     db['blockchain'] = {
                         'start': 0,
                         'count': 0,
@@ -197,9 +188,6 @@ class Blockchain:
     def __run_changes(self, changes):
         for change in changes:
             if change[0] == 'removed':
-                # TODO - looks like there's a bug in forking, leaving this here to try and track it down
-                print(changes)
-                raise Exception("fixing fork!")
                 self.spv.on_block_removed(change[1])
             elif change[0] == 'added':
                 self.spv.on_block_added(change[1])

@@ -40,14 +40,19 @@ def getinfo():
 @exception_printer
 def sendtoaddress(address, amount, memo=''):
     address_bytes = int.to_bytes(pyspv.base58.decode(address), spv.coin.ADDRESS_BYTE_LENGTH, 'big')
+
     k = len(spv.coin.ADDRESS_VERSION_BYTES)
     if address_bytes[:k] == spv.coin.ADDRESS_VERSION_BYTES:
-        payment_builder = pyspv.PubKeyTransactionBuilder(spv.wallet, memo=memo)
-        payment_builder.add_recipient(address, spv.coin.parse_money(amount))
-        tx = payment_builder.finish(True, True)
+        transaction_builder = spv.new_transaction_builder(memo=memo)
+        transaction_builder.process(pyspv.PubKeyPayment(address, spv.coin.parse_money(amount)))
+        transaction_builder.process_change(pyspv.PubKeyChange)
+        tx = transaction_builder.finish(shuffle_inputs=True, shuffle_outputs=True)
+
         if not tx.verify_scripts():
             raise Exception("internal error building transaction")
+
         spv.broadcast_transaction(tx)
+
         return pyspv.bytes_to_hexstring(tx.hash())
 
     return "error: bad address {}".format(address)
@@ -71,7 +76,7 @@ def listspends():
 def server_main():
     global spv
 
-    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=0, testnet=True, listen=('0.0.0.0', 8336))
+    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=4, testnet=True, listen=('0.0.0.0', 8336))
                 #listen=None,
                 #proxy=...,
                 #relay_tx=False,

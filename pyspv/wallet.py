@@ -265,7 +265,6 @@ class Wallet:
     def select_spends(self, categories, amount):
         with self.wallet_lock:
             coins_ret = []
-            value_ret = 0
 
             if self.spv.logging_level <= DEBUG:
                 print("[WALLET] select_spends: start for {} (categories={})".format(self.spv.coin.format_money(amount), ', '.join(categories)))
@@ -334,8 +333,7 @@ class Wallet:
             # if we have a bigger coin and either the stochastic approximation didn't find a good solution,
             # or the next bigger coin is closer, return the bigger coin
             if spend_smallest_over_amount is not None and ((best_total != amount and best_total < (amount + self.spv.coin.DUST_LIMIT)) or (spend_smallest_over_amount.amount <= best_total)):
-                coins_ret.append( spend_smallest_over_amount )
-                value_ret = spend_smallest_over_amount['value']
+                coins_ret.append(spend_smallest_over_amount)
                 if self.spv.logging_level <= DEBUG:
                     print("[WALLET] stochastic approximation failed to find a good subset (best was {}).. using a single larger input of {}!".format(best_total, spend_smallest_over_amount.amount))
                 return [spend_smallest_over_amount]
