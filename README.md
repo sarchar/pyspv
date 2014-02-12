@@ -1,7 +1,7 @@
 pyspv
 =====
 
-pyspv is a no-bullshit easy-to-use Python module implementing the full Bitcoin
+pyspv is a no-bullshit, easy-to-use Python module implementing the full Bitcoin
 SPV client protocol.  Connecting to the Bitcoin network is as easy as:
 
 ```python
@@ -17,7 +17,7 @@ management, etc., and get started immediately writing your cryptocoin applicatio
 
 I intend to make this SPV client as extensible as possible while supporting as
 many alt-coins as possible using simple coin definitions.  You can develop a
-pretty UI wallet or just a simple utility to sent you an E-mail you when an
+pretty UI wallet or just a simple utility to send you an E-mail you when an
 address receives a payment. The possibilities are really endless.
 
 Because pyspv is modular, it is now easy to connect to several different
