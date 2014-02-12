@@ -11,51 +11,6 @@ from ..wallet import InvalidAddress, Spend
 from ..script import *
 from ..util import *
 
-class PubKeyPayment:
-    def __init__(self, address, amount):
-        assert isinstance(amount, int), "amount must be in satoshis"
-        assert isinstance(address, str), "address must be a string"
-
-        self.address = address
-        self.amount = amount
-        
-    def create_outputs(self, spv):
-        address_bytes = int.to_bytes(base58.decode(self.address), spv.coin.ADDRESS_BYTE_LENGTH, 'big')
-        k = len(spv.coin.ADDRESS_VERSION_BYTES)
-        if address_bytes[:k] != spv.coin.ADDRESS_VERSION_BYTES:
-            raise InvalidAddress("Address version is incorrect")
-
-        address_hash = spv.coin.hash(address_bytes[:-4])
-        if address_hash[:4] != address_bytes[-4:]:
-            raise InvalidAddress("Address checksum is incorrect")
-
-        script = Script()
-        script.push_op(OP_DUP)
-        script.push_op(OP_HASH160)
-        script.push_bytes(address_bytes[k:-4])
-        script.push_op(OP_EQUALVERIFY)
-        script.push_op(OP_CHECKSIG)
-
-        yield TransactionOutput(amount=self.amount, script=script)
-
-class PubKeyChange:
-    def __init__(self):
-        pass
-
-    def create_one(self, spv):
-        change_private_key = PrivateKey.create_new()
-        change_address = change_private_key.get_public_key(True).as_hash160(spv.coin)
-
-        script = Script()
-        script.push_op(OP_DUP)
-        script.push_op(OP_HASH160)
-        script.push_bytes(change_address)
-        script.push_op(OP_EQUALVERIFY)
-        script.push_op(OP_CHECKSIG)
-
-        spv.wallet.add('private_key', change_private_key, {'label': ''})
-        return TransactionOutput(amount=0, script=script)
-
 class PubKeySpendInputCreator:
     '''Input creators need to define the following class values:
         self.prevout : a TransactionPrevOut
@@ -104,13 +59,12 @@ class PubKeySpend(Spend):
         '''one spend is equal to another only based on the prevout value'''
         return self.coin.hash(self.prevout.serialize())
 
-    def destination_name(self):
-        return self.address
-
     def is_spent(self):
         return len(self.spent_in) != 0
 
     def is_spendable(self, spv):
+        # TODO check to see if we have a private key for enough pubkeys listed in the redemption script
+        return False
         # TODO check spent_in txids to see if any haven't confirmed for a while and allow respending after some time?
         return not self.is_spent() and self.get_confirmations(spv) >= self.coin.TRANSACTION_CONFIRMATION_DEPTH
 
@@ -146,7 +100,7 @@ class PubKeySpend(Spend):
         return spends, data
 
     def __str__(self):
-        return '<PubKeySpend {} BTC prevout={}{}>'.format(self.coin.format_money(self.amount), str(self.prevout), ' SPENT' if len(self.spent_in) else '')
+        return '<PubKeySpend {} BTC prevout={} address={}{}>'.format(self.coin.format_money(self.amount), str(self.prevout), self.address, ' SPENT' if len(self.spent_in) else '')
 
 class PubKeyPaymentMonitor(BaseMonitor):
     spend_classes = [PubKeySpend]
@@ -177,7 +131,7 @@ class PubKeyPaymentMonitor(BaseMonitor):
         wallet.add_temp('address', address, {'public_key': public_key})
 
         if self.spv.logging_level <= DEBUG:
-            print('[PUBKEYPAYMENTS] watching for payments to {}'.format(address))
+            print('[PUBKEYPAYMENTMONITOR] watching for payments to {}'.format(address))
 
         public_key = private_key.get_public_key(True)
         address = public_key.as_address(self.spv.coin)
@@ -191,15 +145,11 @@ class PubKeyPaymentMonitor(BaseMonitor):
         wallet.add_temp('address', address, {'public_key': public_key})
 
         if self.spv.logging_level <= DEBUG:
-            print('[PUBKEYPAYMENTS] watching for payments to {}'.format(address))
+            print('[PUBKEYPAYMENTMONITOR] watching for payments to {}'.format(address))
 
     def on_tx(self, tx):
         tx_saved = False
         tx_hash = tx.hash()
-
-        if self.spv.txdb.has_tx(tx_hash):
-            # We've seen this tx before.  Done.
-            return
 
         # check inputs, they might spend coins from the wallet
         for i, input in enumerate(tx.inputs):
@@ -247,7 +197,7 @@ class PubKeyPaymentMonitor(BaseMonitor):
 
             # this spend is spent!
             if self.spv.logging_level <= INFO:
-                print('[SPEND] tx {} spends {} amount={}'.format(bytes_to_hexstring(tx_hash), input.prevout, self.spv.coin.format_money(spend.amount)))
+                print('[PUBKEYPAYMENTMONITOR] tx {} spends {} amount={}'.format(bytes_to_hexstring(tx_hash), input.prevout, self.spv.coin.format_money(spend.amount)))
 
             spend.spent_in.add(tx_hash)
             self.spv.wallet.update_spend(spend)

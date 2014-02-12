@@ -248,7 +248,16 @@ class Manager(threading.Thread):
             return
 
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.listen_socket.bind(self.listen_address)
+
+        try:
+            self.listen_socket.bind(self.listen_address)
+        except OSError:
+            if self.spv.logging_level <= WARNING:
+                print("[NETWORK] couldn't listen on address {}".format(self.listen_address))
+            self.listen_socket.close()
+            self.listen_socket = None
+            return
+            
         self.listen_socket.setblocking(False)
         self.listen_socket.listen(5)
 

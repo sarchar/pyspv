@@ -15,8 +15,10 @@ from . import wallet
 
 from .bitcoin import *
 
-from .monitors.pubkey import PubKeyPayment, PubKeyChange, PubKeyPaymentMonitor
-from .monitors.scripthash import ScriptHashPayment, ScriptHashPaymentMonitor
+from .monitors.pubkey import PubKeyPaymentMonitor
+from .monitors.scripthash import MultisigScriptHashPaymentMonitor
+
+from .payments import PubKeyChange, PubKeyPayment, ScriptHashPayment
 
 from .util import *
 
@@ -71,7 +73,7 @@ class pyspv:
         self.blockchain = blockchain.Blockchain(spv=self)
         self.txdb = txdb.TransactionDatabase(spv=self)
 
-        self.wallet = wallet.Wallet(spv=self, monitors=[PubKeyPaymentMonitor, ScriptHashPaymentMonitor])
+        self.wallet = wallet.Wallet(spv=self, monitors=[PubKeyPaymentMonitor, MultisigScriptHashPaymentMonitor])
 
         self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, listen=listen)
         self.network_manager.start()

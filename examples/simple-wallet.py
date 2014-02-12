@@ -62,7 +62,10 @@ def sendtoaddress(address, amount, memo=''):
 
     spv.broadcast_transaction(tx)
 
-    return pyspv.bytes_to_hexstring(tx.hash())
+    return {
+        'tx': pyspv.bytes_to_hexstring(tx.serialize(), reverse=False),
+        'hash': pyspv.bytes_to_hexstring(tx.hash()),
+    }
 
 @exception_printer
 def getbalance():
@@ -143,7 +146,7 @@ def genmultisig(nreq, *pubkeys):
 def server_main():
     global spv
 
-    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=0, testnet=True, listen=('0.0.0.0', 8336))
+    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=4, testnet=True, listen=('0.0.0.0', 8336))
                 #listen=None,
                 #proxy=...,
                 #relay_tx=False,

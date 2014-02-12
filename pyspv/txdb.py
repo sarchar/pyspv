@@ -104,7 +104,7 @@ class TransactionDatabase:
                 with closing(shelve.open(self.transaction_database_file)) as txdb:
                     txdb['watched_block_height'] = self.watched_block_height
                 if self.spv.logging_level <= DEBUG:
-                    print('[TXDB] block {} added to txdb at height={}'.format(bytes_to_hexstring(block_hash), self.blockchain_height))
+                    print('[TXDB] block {} watched in txdb at height={}'.format(bytes_to_hexstring(block_hash), self.blockchain_height))
 
     def get_tx_depth(self, tx_hash):
         with self.db_lock:
