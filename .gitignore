@@ -9,3 +9,5 @@ syntax: glob
 __pycache__
 .hg
 .hgignore
+docs/_build
+
