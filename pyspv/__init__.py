@@ -87,9 +87,13 @@ class pyspv:
         return args
 
     def shutdown(self):
+        '''Initiate asynchronous shutdown.  This peacefully disconnects from network peers and saves all necessary data.
+
+        After calling :py:meth:`~pyspv.shutdown`, you may call :py:meth:`~pyspv.join` to block on shutdown.'''
         self.network_manager.shutdown()
     
     def join(self):
+        '''Block until shutdown is complete.  If :py:meth:`~pyspv.shutdown` hasn't been called yet, this function will block forever.'''
         self.network_manager.join()
 
     def adjusted_time(self):
@@ -125,6 +129,9 @@ class pyspv:
         self.network_manager.add_to_inventory(tx_inv, tx, network.Manager.INVENTORY_FLAG_MUST_CONFIRM if must_confirm else 0)
 
     def on_tx(self, tx):
+        '''Called for every transaction seen on the network, whether it come from a block or relayed separately.
+
+        If you override this method, be sure to call :py:meth:`pyspv.on_tx`. Otherwise, the wallet will not see any payments.'''
         self.wallet.on_tx(tx)
 
     def on_block(self, block):
