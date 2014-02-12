@@ -16,7 +16,7 @@ from . import wallet
 from .bitcoin import *
 
 from .monitors.pubkey import PubKeyPaymentMonitor
-from .monitors.scripthash import MultisigScriptHashPaymentMonitor
+from .monitors.multisig import MultisigScriptHashPaymentMonitor
 
 from .payments import PubKeyChange, PubKeyPayment, ScriptHashPayment
 
