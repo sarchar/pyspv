@@ -7,6 +7,8 @@ class InvalidMoney(Exception):
     pass
 
 class Bitcoin:
+    NAME                       = 'Bitcoin'
+
     ADDRESS_VERSION_BYTES      = b'\x00'
     ADDRESS_BYTE_LENGTH        = 25 # 1 for version byte + 20 for ripemd60 hash + 4 for checksum
     P2SH_ADDRESS_VERSION_BYTES = b'\x05'

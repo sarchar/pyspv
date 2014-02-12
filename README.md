@@ -6,18 +6,23 @@ SPV client protocol.  Connecting to the Bitcoin network is as easy as:
 
 ```python
 import pyspv
-spv = pyspv.pyspv("demo")
+spv = pyspv.pyspv("my-application-name")
 ...
 ```
 
 ... but just connecting to the Bitcoin network would be boring.  The real goal
-of this project is to make it so you can just ignore all the Bitcoin protocol
-details like Blockchain syncing and the peer-to-peer network, and get started
-immediately on writing your Bitcoin application.  
+of this project is to make it so you can just ignore all the protocol details
+like Blockchain syncing, the peer-to-peer network, misbehaving peers, payment
+management, etc., and get started immediately writing your cryptocoin application.  
 
-I intend to make this Bitcoin client as extensible as possible.  You can
-develop a full wallet or just a simple utility to E-mail you when an address
-receives coins.  The possibilities are endless.
+I intend to make this SPV client as extensible as possible while supporting as
+many alt-coins as possible using simple coin definitions.  You can develop a
+pretty UI wallet or just a simple utility to sent you an E-mail you when an
+address receives a payment. The possibilities are really endless.
+
+Because pyspv is modular, it is now easy to connect to several different
+alt-coin networks within the same application -- simply initialize two pyspv
+classes with different altcoins.
 
 requirements
 ============
@@ -37,3 +42,6 @@ documentation
 =============
 
 TODO
+
+Documentation will soon be available at http://docs.pyspv.org/
+

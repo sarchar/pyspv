@@ -96,7 +96,7 @@ class MultisigScriptHashPaymentMonitor(BaseMonitor):
 
         wallet.add_temp('address', address, {'redemption_script': redemption_script})
 
-        print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] watching for script-hash payment to {}'.format(address))
+        print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] watching for multi-signature payment to {}'.format(address))
 
     def on_tx(self, tx):
         tx_saved = False

@@ -27,7 +27,7 @@ VERSION_NUMBER = 0x00000101
 
 class pyspv:
     class config:
-        def __init__(self, name, testnet=False):
+        def __init__(self, name, coin, testnet=False):
             if os.name != 'nt':
                 name = '.' + name
 
@@ -37,6 +37,10 @@ class pyspv:
             else:
                 self.path = os.sep.join([os.path.expanduser("~"), name])
             
+            if not os.path.exists(self.path):
+                os.mkdir(self.path)
+
+            self.path = os.sep.join([self.path, coin.NAME.lower()])
             if not os.path.exists(self.path):
                 os.mkdir(self.path)
 
@@ -63,7 +67,7 @@ class pyspv:
 
         self.coin = coin.Testnet if testnet else coin
 
-        self.config = pyspv.config(app_name, testnet=testnet)
+        self.config = pyspv.config(app_name, self.coin, testnet=testnet)
 
         if self.logging_level <= DEBUG:
             print('[PYSPV] app data at {}'.format(self.config.path))
