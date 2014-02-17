@@ -96,7 +96,8 @@ class TransactionDatabase:
                 with closing(shelve.open(self.transaction_database_file)) as txdb:
                     txdb['watched_block_height'] = self.watched_block_height
 
-    def on_block_added(self, block_hash):
+    def on_block_added(self, block_header, block_height):
+        block_hash = block_header.hash()
         with self.db_lock:
             self.blockchain_height += 1
             if block_hash in self.watched_block_height:
@@ -106,7 +107,8 @@ class TransactionDatabase:
                 if self.spv.logging_level <= DEBUG:
                     print('[TXDB] block {} watched in txdb at height={}'.format(bytes_to_hexstring(block_hash), self.blockchain_height))
 
-    def get_tx_depth(self, tx_hash):
+    def get_tx_depth(self, block_header, block_height):
+        block_hash = block_header.hash()
         with self.db_lock:
             for block_hash in self.transaction_cache[tx_hash]['in_blocks']:
                 h = self.watched_block_height[block_hash]

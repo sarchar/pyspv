@@ -3,7 +3,7 @@ import time
 import traceback
 
 def main():
-    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.INFO, peer_goal=0, testnet=True) #listen=None
+    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=0, testnet=False) #listen=None
 
     total_confirmed = 0
     total_unconfirmed = 0

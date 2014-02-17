@@ -6,6 +6,7 @@
    :numbered:
 
    network.rst
+   transactionbuilder.rst
    wallet.rst
    util.rst
 

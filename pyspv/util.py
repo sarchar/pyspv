@@ -1,5 +1,6 @@
 import fractions
 import random
+import os
 from . import base58
 
 DEBUG = 0
@@ -7,6 +8,33 @@ INFO = 1
 WARNING = 2
 ERROR = 3
 CRITICAL = 4
+
+class Config:
+    def __init__(self, name, coin, testnet=False):
+        if os.name != 'nt':
+            name = '.' + name
+
+        e = os.getenv("APPDATA")
+        if e is not None:
+            self.path = os.sep.join([e, name])
+        else:
+            self.path = os.sep.join([os.path.expanduser("~"), name])
+        
+        if not os.path.exists(self.path):
+            os.mkdir(self.path)
+
+        self.path = os.sep.join([self.path, coin.NAME.lower()])
+        if not os.path.exists(self.path):
+            os.mkdir(self.path)
+
+        if testnet:
+            self.path = os.sep.join([self.path, 'testnet'])
+            if not os.path.exists(self.path):
+                os.mkdir(self.path)
+
+    def get_file(self, f):
+        return os.sep.join([self.path, f])
+
 
 def bytes_to_hexstring(data, reverse=True):
     if reverse:

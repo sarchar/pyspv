@@ -188,9 +188,9 @@ class Blockchain:
     def __run_changes(self, changes):
         for change in changes:
             if change[0] == 'removed':
-                self.spv.on_block_removed(change[1])
+                self.spv.on_block_removed(*change[1:])
             elif change[0] == 'added':
-                self.spv.on_block_added(change[1])
+                self.spv.on_block_added(*change[1:])
 
     def __connect_block_link(self, blockchain, block_link, skip_validation=False):
         changes = []
@@ -388,7 +388,7 @@ class Blockchain:
                 assert count >= 0, "this is bad."
                 blockchain['count'] = count
 
-            changes.append(('removed', old_best_chain['hash']))
+            changes.append(('removed', old_best_chain['header'], old_best_chain['height']))
             old_best_chain['main'] = False
             old_best_chain = old_best_chain['prev']
 
@@ -440,7 +440,7 @@ class Blockchain:
                 blockchain['start'] = start
                 blockchain['links'] = links
 
-            changes.append(('added', notify_block_link['hash']))
+            changes.append(('added', notify_block_link['header'], notify_block_link['height']))
 
         if self.spv.logging_level <= INFO and blockchain is not None:
             print('[BLOCKCHAIN] new best chain = {} (height={})'.format(bytes_to_hexstring(self.best_chain['hash']), self.best_chain['height']))
