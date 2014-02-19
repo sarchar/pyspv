@@ -159,7 +159,7 @@ class MultisigScriptHashPaymentMonitor(BaseMonitor):
             if len(redemption_script) - (index + 1) < size:
                 return
             public_keys.append(redemption_script[index+1:index+1+size])
-            if (size == 33 and public_keys[-1][0] != 0x02) or (size == 65 and public_keys[-1][0] not in (0x03, 0x04)):
+            if (size == 33 and (public_keys[-1][0] not in (0x02, 0x03))) or (size == 65 and public_keys[-1][0] != 0x04):
                 return
             index += size + 1
 
@@ -210,7 +210,7 @@ class MultisigScriptHashPaymentMonitor(BaseMonitor):
             if len(input.script.program) == 0 or input.script.program[0] != OP_0:
                 continue
 
-            # Break the program into data pushes...
+            # Break the program into data pushes... TODO: move this to script.py
             index = 1
             pushes = []
             while index < len(input.script.program):

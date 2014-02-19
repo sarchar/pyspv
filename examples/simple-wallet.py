@@ -72,15 +72,23 @@ def getbalance():
     return dict((k, spv.coin.format_money(v)) for k, v in spv.wallet.balance.items())
 
 @exception_printer
-def getnewaddress(label='', compressed=0):
-    compressed = bool(int(compressed))
+def getnewaddress(label='', compressed=False):
+    if str(compressed).lower() in ('1', 'true'):
+        compressed = True
+    else:
+        compressed = False
+
     pk = pyspv.keys.PrivateKey.create_new()
     spv.wallet.add('private_key', pk, {'label': label})
     return pk.get_public_key(compressed).as_address(spv.coin)
 
 @exception_printer
-def getnewpubkey(label='', compressed=0):
-    compressed = bool(int(compressed))
+def getnewpubkey(label='', compressed=False):
+    if str(compressed).lower() in ('1', 'true'):
+        compressed = True
+    else:
+        compressed = False
+
     pk = pyspv.keys.PrivateKey.create_new()
     spv.wallet.add('private_key', pk, {'label': label})
     return pk.get_public_key(compressed).as_hex()
@@ -89,6 +97,9 @@ def getnewpubkey(label='', compressed=0):
 def listspends(include_spent=False):
     if str(include_spent).lower() in ('1', 'true'):
         include_spent = True
+    else:
+        include_spent = False
+
     spendable = []
     not_spendable = []
     for spend in spv.wallet.spends.values():
@@ -163,6 +174,8 @@ def genmultisig(nreq, mtotal, *pubkeys):
         spv.wallet.add('redemption_script', redemption_script, {})
     except pyspv.wallet.DuplicateWalletItem:
         # No worries, we already have this redemption script
+        if spv.logging_level <= pyspv.INFO:
+            print('[simple-wallet] Duplicate redemption script??')
         pass
 
     return {
@@ -175,13 +188,20 @@ def genmultisig(nreq, mtotal, *pubkeys):
 def server_main():
     global spv
 
-    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.DEBUG, peer_goal=4, testnet=True, listen=('0.0.0.0', 8336))
+    logging_level = pyspv.WARNING
+    if '-v' in sys.argv:
+        logging_level = pyspv.INFO
+    if '-vv' in sys.argv or '-vvv' in sys.argv:
+        logging_level = pyspv.DEBUG
+
+    spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=logging_level, peer_goal=4, testnet=True, listen=('0.0.0.0', 8336))
                 #listen=None,
                 #proxy=...,
                 #relay_tx=False,
 
     rpc_server = SimpleXMLRPCServer((RPC_LISTEN_ADDRESS, RPC_LISTEN_PORT), allow_none=True)
     rpc_server.register_function(getnewaddress)
+    rpc_server.register_function(getnewpubkey)
     rpc_server.register_function(getbalance)
     rpc_server.register_function(sendtoaddress)
     rpc_server.register_function(getinfo)
