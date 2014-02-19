@@ -41,9 +41,13 @@ class pyspv:
     :type listen: tuple (string, integer)
     :param coin: the coin definition
     :type coin: coin class
+    :param tor: enable Tor SOCKS connections (disables incoming connections)
+    :type tor: boolean
+    :param sync_block_start: specify the block number to start syncing at
+    :type sync_block_start: integer or None
     '''
 
-    def __init__(self, app_name, testnet=False, peer_goal=8, logging_level=WARNING, listen=('', 0), coin=Bitcoin, tor=False):
+    def __init__(self, app_name, testnet=False, peer_goal=8, logging_level=WARNING, listen=('', 0), coin=Bitcoin, tor=False, sync_block_start=None):
         '''
         '''
         self.app_name = app_name
@@ -51,6 +55,7 @@ class pyspv:
         self.logging_level = logging_level
         self.testnet = testnet
         self.time_samples = []
+        self.sync_block_start = sync_block_start
 
         # Command-line arguments can override constructor args
         self.args = self.__parse_arguments()
@@ -61,6 +66,9 @@ class pyspv:
         if self.args.tor:
             tor = True
 
+        if self.args.sync_block_start is not None:
+            self.sync_block_start = self.args.sync_block_start
+            
         self.coin = coin.Testnet if testnet else coin
 
         self.config = Config(app_name, self.coin, testnet=testnet)
@@ -85,6 +93,7 @@ class pyspv:
         parser.add_argument('--testnet', action='store_const', default=False, const=True)
         parser.add_argument('--tor', action='store_const', default=False, const=True)
         parser.add_argument('--torproxy', type=str, default=None, help='specify tor proxy (default 127.0.0.1:9050, implies --tor)')
+        parser.add_argument('--sync-block-start', type=int, default=None, help='specify the block number at which to start downloading full blocks')
         args, remaining = parser.parse_known_args()
         sys.argv = [sys.argv[0]] + remaining
 

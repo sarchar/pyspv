@@ -40,14 +40,17 @@ class Bitcoin:
     MAX_COINS = 21000000 * COIN 
     DUST_LIMIT = 100000
 
-    GENESIS_BLOCK_HASH = hexstring_to_bytes("000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f")
-
     MAXIMUM_TRANSACTION_FEE = 1000000
     MINIMUM_TRANSACTION_FEE = 10000
     MINIMUM_TRANSACTION_FEE_FOR_RELAY = 10000
 
     # Number of confirmations for a transaction to be considered confirmed
     TRANSACTION_CONFIRMATION_DEPTH = 7
+
+    # Genesis details
+    GENESIS_BLOCK_HASH      = hexstring_to_bytes("000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f")
+    GENESIS_BLOCK_TIMESTAMP = 1231006505
+    GENESIS_BLOCK_BITS      = 0x1D00FFFF
 
     # Checkpoint block height MUST be a multiple of the work interval in order to verify difficulty changes
     CHECKPOINT_BLOCK_HASH      = hexstring_to_bytes("0000000000000003cbb18a8ea04e14452ad0c3bc92ed709e4df5a50b2a24da0e")
@@ -154,7 +157,9 @@ class BitcoinTestnet(Bitcoin):
         'testnet-seed.bluematt.me',
     ]
  
-    GENESIS_BLOCK_HASH = hexstring_to_bytes("000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943")
+    GENESIS_BLOCK_HASH      = hexstring_to_bytes("000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943")
+    GENESIS_BLOCK_TIMESTAMP = 1296688602
+    GENESIS_BLOCK_BITS      = 0x1D00FFFF
 
     # No checkpoint (yet) for testnet
     CHECKPOINT_BLOCK_HASH      = hexstring_to_bytes("0000000000035aa86364e6659e54913388a6d8d6f42587771a5dc9f9bf383f4f")

@@ -23,7 +23,7 @@ class Blockchain:
         self.blockchain_db_file = spv.config.get_file("blockchain")
         self.blockchain_lock = threading.Lock() # TODO use RLock?
 
-        genesis = self.create_block_link(hash=self.spv.coin.GENESIS_BLOCK_HASH, height=0, main=True, connected=True)
+        genesis = self.create_block_link(hash=self.spv.coin.GENESIS_BLOCK_HASH, height=0, main=True, connected=True, header=BlockHeader(spv.coin, timestamp=self.spv.coin.GENESIS_BLOCK_TIMESTAMP, bits=self.spv.coin.GENESIS_BLOCK_BITS))
         checkpoint = self.create_block_link(hash=self.spv.coin.CHECKPOINT_BLOCK_HASH, height=self.spv.coin.CHECKPOINT_BLOCK_HEIGHT, main=True, connected=True, header=BlockHeader(spv.coin, timestamp=self.spv.coin.CHECKPOINT_BLOCK_TIMESTAMP, bits=self.spv.coin.CHECKPOINT_BLOCK_BITS))
 
         self.blocks = {
@@ -31,14 +31,22 @@ class Blockchain:
             self.spv.coin.CHECKPOINT_BLOCK_HASH: checkpoint,
         }
 
-        self.best_chain = checkpoint
-
         self.unknown_referenced_blocks = collections.defaultdict(set)
 
         with self.blockchain_lock:
             with closing(shelve.open(self.blockchain_db_file)) as db:
                 if 'needs_headers' not in db or self.spv.args.resync:
                     db['needs_headers'] = True
+
+                # Make sure sync_block_start is consistent between restarts
+                if 'sync_block_start' not in db:
+                    db['sync_block_start'] = None
+
+                if self.spv.sync_block_start is not None:
+                    db['sync_block_start'] = self.spv.sync_block_start
+
+                self.sync_block_start = db['sync_block_start']
+                self.best_chain = (checkpoint if (self.sync_block_start is None or self.sync_block_start >= checkpoint['height']) else genesis)
 
                 if 'blockchain' not in db or self.spv.args.resync:
                     db['blockchain'] = {
@@ -154,7 +162,7 @@ class Blockchain:
                     changes = changes + self.__connect_block_link(blockchain, new_block_link)
                     assert self.best_chain is new_block_link
 
-                    if self.best_chain['header'].timestamp >= self.spv.wallet.creation_time - (24 * 60 * 60):
+                    if (self.best_chain['header'].timestamp >= self.spv.wallet.creation_time - (24 * 60 * 60)) or (self.sync_block_start is not None and self.best_chain['height'] >= self.sync_block_start):
                         print('headers sync done, switching to full blocks')
                         self.needs_headers = db['needs_headers'] = False
                         break
