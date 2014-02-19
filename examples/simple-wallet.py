@@ -218,8 +218,6 @@ def server_main():
         logging_level = pyspv.DEBUG
 
     spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=logging_level, peer_goal=4, testnet=True, listen=('0.0.0.0', 8336))
-                #listen=None,
-                #proxy=...,
                 #relay_tx=False,
 
     rpc_server = SimpleXMLRPCServer((RPC_LISTEN_ADDRESS, RPC_LISTEN_PORT), allow_none=True)

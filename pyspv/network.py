@@ -33,7 +33,6 @@ class Manager(threading.Thread):
 
     PROTOCOL_VERSION = 60002
     SERVICES = 1
-    USER_AGENT = '/Satoshi:0.7.2/'
 
     BLOCKCHAIN_SYNC_WAIT_TIME = 10
 
@@ -53,10 +52,11 @@ class Manager(threading.Thread):
     INVENTORY_FLAG_HOLD_FOREVER = 0x01
     INVENTORY_FLAG_MUST_CONFIRM = 0x02
 
-    def __init__(self, spv=None, peer_goal=1, listen=('', 0), tor=False):
+    def __init__(self, spv=None, peer_goal=1, listen=('', 0), tor=False, user_agent='pyspv'):
         threading.Thread.__init__(self)
         self.spv = spv
         self.peer_goal = peer_goal
+        self.user_agent = '/{}/'.format(user_agent).replace(' ', ':')
 
         self.peers = {}
         self.peer_addresses_db_file = self.spv.config.get_file("addresses.dat")
@@ -888,7 +888,7 @@ class Peer(threading.Thread):
         sender_address    = Serialize.serialize_network_address(None, services, with_timestamp=False)
         
         nonce      = random.randrange(0, 1 << 64)
-        user_agent = Serialize.serialize_string(Manager.USER_AGENT)
+        user_agent = Serialize.serialize_string(self.manager.user_agent)
         last_block = 0 # we aren't a full node...
 
         payload = struct.pack("<LQQ", version, services, now) + recipient_address + sender_address + struct.pack("<Q", nonce) + user_agent + struct.pack("<L", last_block)

@@ -76,7 +76,7 @@ class Blockchain:
                     # changes are ignored when loading
                     self.__connect_block_link(None, block_link, skip_validation=True)
 
-                    # First block has to be manually connected. The rest of the blocks will connect
+                    # First block has to be manually connected. The rest of the blocks will connect normally
                     if i == 0:
                         block_link['connected'] = True
                         block_link['main'] = True
@@ -84,7 +84,9 @@ class Blockchain:
                         self.best_chain = block_link
                     else:
                         if self.best_chain is not block_link:
-                            raise Exception("Uh oh. Blockchain state is corrupted.")
+                            #print("Error connecting block {}".format(str(block_link['header'])))#bytes_to_hexstring(block_link['hash'])))
+                            #print("best block is {}".format(str(self.best_chain['header'])))#bytes_to_hexstring(self.best_chain['hash'])))
+                            raise Exception("Uh oh. Blockchain state is corrupted. Loaded {} blocks to height {}.".format(i, self.best_chain['height']))
 
                 if self.spv.logging_level <= INFO:
                     print('[BLOCKCHAIN] done ({:5.3f} sec)'.format(time.time()-start_time))
@@ -169,7 +171,7 @@ class Blockchain:
 
                 db['blockchain'] = blockchain
 
-        self.__run_changes(changes)
+            self.__run_changes(changes)
 
         if self.spv.logging_level <= INFO:
             print("[BLOCKCHAIN] added {} headers (new height = {})".format(len(new_block_links), self.best_chain['height']))
@@ -180,7 +182,7 @@ class Blockchain:
         if not block.check():
             return
 
-        block_link = self.create_block_link(block.header.hash(), header=block.header)
+        block_link = self.create_block_link(hash=block.header.hash(), header=block.header)
 
         # __connect_block_link drops the block data after its connected to the block tree
         block_link['block'] = block
@@ -191,7 +193,7 @@ class Blockchain:
                 changes = self.__connect_block_link(blockchain, block_link)
                 db['blockchain'] = blockchain
 
-        self.__run_changes(changes)
+            self.__run_changes(changes)
 
     def __run_changes(self, changes):
         for change in changes:
@@ -409,6 +411,14 @@ class Blockchain:
 
         if new_best_chain is not old_best_chain:
             while new_best_chain['hash'] != old_best_chain['hash']:
+                if blockchain is not None:
+                    # drop count by one and notify SPV that a block was removed from the chain
+                    count = blockchain['count']
+                    count -= 1
+                    assert count >= 0, "this is bad."
+                    blockchain['count'] = count
+
+                changes.append(('removed', old_best_chain['header'], old_best_chain['height']))
                 old_best_chain['main'] = False
                 old_best_chain = old_best_chain['prev']
 

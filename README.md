@@ -22,7 +22,7 @@ address receives a payment. The possibilities are really endless.
 
 Because pyspv is modular, it is now easy to connect to several different
 alt-coin networks within the same application -- simply initialize two pyspv
-classes with different altcoins.
+classes with different coin definitions.
 
 requirements
 ============
@@ -33,10 +33,26 @@ pyspv only relies on a small handful of dependencies:
 * OpenSSL :: You'll need libssl.so (Linux/Mac) or libeay32.dll (Windows) in your path.
 * [Bitarray](https://pypi.python.org/pypi/bitarray/) :: This is required by the bloom filter implementation.
 
+features
+========
+
+* SPV implementation, so relatively lightweight
+* Python, useful for server and user applications
+* Multisignature support, can create, send to and spend multisignature payments
+* Stealth address support, can create, send to and spend stealth address payments
+* Tor/SOCKS support
+* Testnet support
+* Extensible payment monitor and transaction building system
+
 examples
 ========
 
-You can start by examining the sample applications in the examples directory.
+simple-wallet.py
+----------------
+
+This example runs a basic wallet.  Running it with no arguments starts an RPC
+server.  With arguments, an RPC call is made.  The program behaves similarly to
+bitcoind, with several noticeable differences.
 
 documentation
 =============

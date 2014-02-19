@@ -88,7 +88,7 @@ class pyspv:
         self.wallet = wallet.Wallet(spv=self, monitors=[PubKeyPaymentMonitor, MultisigScriptHashPaymentMonitor, StealthAddressPaymentMonitor])
         self.wallet.load()
 
-        self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, listen=listen, tor=tor)
+        self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, listen=listen, tor=tor, user_agent=VERSION)
         self.network_manager.start()
 
     def __parse_arguments(self):
