@@ -40,10 +40,10 @@ class PubKeySpendInputCreator:
         return TransactionInput(prevout=self.prevout, script=script)
 
     def estimated_script_size(self):
-        # signatures are at most 73 bytes
+        # signatures are at most 73 bytes (+2 for size)
         # plus 1 byte for the signature hash type
-        # pubkeys are 33 if compressed, 65 if uncompressed
-        return 73 + 1 + (len(self.address_info['public_key_hex']) // 2)
+        # pubkeys are 33 if compressed, 65 if uncompressed (+1 for size)
+        return 2 + 73 + 1 + 1 + (len(self.address_info['public_key_hex']) // 2)
 
 class PubKeySpend(Spend):
     def __init__(self, coin, category, amount, address, prevout, script, address_info, spent_in=None):
@@ -79,8 +79,8 @@ class PubKeySpend(Spend):
                Serialize.serialize_dict(self.address_info) + \
                Serialize.serialize_list(list(self.spent_in))
 
-    @staticmethod
-    def unserialize(data, coin):
+    @classmethod
+    def unserialize(cls, data, coin):
         category, data = Serialize.unserialize_string(data)
         amount, data = Serialize.unserialize_variable_int(data)
         prevout, data = TransactionPrevOut.unserialize(data)
@@ -93,11 +93,11 @@ class PubKeySpend(Spend):
 
         spent_in, data = Serialize.unserialize_list(data)
 
-        spends = PubKeySpend(coin, category, amount, address, prevout, script, address_info, spent_in=spent_in)
+        spends = cls(coin, category, amount, address, prevout, script, address_info, spent_in=spent_in)
         return spends, data
 
     def __str__(self):
-        return '<PubKeySpend {} BTC prevout={} address={}{}>'.format(self.coin.format_money(self.amount), str(self.prevout), self.address, ' SPENT' if len(self.spent_in) else '')
+        return '<{} {} BTC prevout={} address={}{}>'.format(self.__class__.__name__, self.coin.format_money(self.amount), str(self.prevout), self.address, ' SPENT' if len(self.spent_in) else '')
 
 class PubKeyPaymentMonitor(BaseMonitor):
     spend_classes = [PubKeySpend]
@@ -132,7 +132,6 @@ class PubKeyPaymentMonitor(BaseMonitor):
                 print('[PUBKEYPAYMENTMONITOR] watching for payments to {}'.format(address))
 
     def on_tx(self, tx):
-        tx_saved = False
         tx_hash = tx.hash()
 
         # check inputs, they might spend coins from the wallet, even if we don't know about the coins yet

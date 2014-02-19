@@ -184,7 +184,6 @@ class MultisigScriptHashPaymentMonitor(BaseMonitor):
             print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] {} of {} public_keys: {}'.format(nreq, len(public_keys), ', '.join(bytes_to_hexstring(public_key, reverse=False) for public_key in public_keys)))
 
     def on_tx(self, tx):
-        tx_saved = False
         tx_hash = tx.hash()
 
         # check inputs, they might spend coins from the wallet
