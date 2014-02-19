@@ -571,7 +571,7 @@ class Peer(threading.Thread):
             self.bytes_sent = 0
             self.bytes_received = 0
             self.last_data_time = time.time()
-            self.last_block_time = time.time()
+            self.last_block_inv_time = time.time()
             self.inprogress_command = ''
             self.outgoing_data_queue = collections.deque()
             self.peer_verack = 0
@@ -774,7 +774,7 @@ class Peer(threading.Thread):
         if len(self.inprogress_invs) > 0:
             inprogress_block_invs = [inv for inv in self.inprogress_invs if inv.type == Inv.MSG_BLOCK]
             if len(inprogress_block_invs):
-                if self.inprogress_command != 'block' and (now - self.last_block_time) > Manager.BLOCK_REQUEST_TIMEOUT:
+                if self.inprogress_command != 'block' and (now - self.last_block_inv_time) > Manager.BLOCK_REQUEST_TIMEOUT:
                     # Peer is ignoring our request for blocks...
                     if self.manager.spv.logging_level <= WARNING:
                         print('[PEER] {} peer is ignoring our request for blocks'.format(self.peer_address))
@@ -824,6 +824,9 @@ class Peer(threading.Thread):
         if len(invs) != 0:
             now = time.time()
             for inv in invs:
+                # Requesting a new block, so allow time to timeout...
+                if inv.type == Inv.MSG_BLOCK:
+                    self.last_block_inv_time = time.time()
                 self.inprogress_invs[inv] = now
                 yield inv
             self.send_getdata(invs)
@@ -1094,7 +1097,6 @@ class Peer(threading.Thread):
  
             self.manager.received_block(inv, block, self.syncing_blockchain != 0)
             self.inprogress_invs.pop(inv)
-            self.last_block_time = time.time()
 
             # If we are not syncing from this peer and the peer sends us a block that doesn't connect,
             # we should try syncing again.  If the peer again doesn't send us blocks, we should disconnect.

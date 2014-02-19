@@ -80,8 +80,14 @@ def getnewaddress(label='', compressed=0):
 
 @exception_printer
 def listspends():
-    s = [str(spend['spend']) for spend in spv.wallet.spends.values()]
-    return '\n'.join(s)
+    spendable = []
+    not_spendable = []
+    for spend in spv.wallet.spends.values():
+        if spend['spend'].is_spendable(spv):
+            spendable.append(str(spend['spend']))
+        else:
+            not_spendable.append(str(spend['spend']) + ', confirmations={}'.format(spend['spend'].get_confirmations(spv)))
+    return 'Spendable:\n' + '\n'.join(spendable) + '\nNot Spendable ({} confirmations required):\n'.format(spv.coin.TRANSACTION_CONFIRMATION_DEPTH) + '\n'.join(not_spendable)
 
 @exception_printer
 def dumppubkey(address):

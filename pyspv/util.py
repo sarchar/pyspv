@@ -10,7 +10,8 @@ ERROR = 3
 CRITICAL = 4
 
 class Config:
-    def __init__(self, name, coin, testnet=False):
+    '''Config is reponsible for locating a consistent location for configuration files, and separating coins and their testnet data'''
+    def __init__(self, name, coin, testnet):
         if os.name != 'nt':
             name = '.' + name
 
@@ -33,6 +34,11 @@ class Config:
                 os.mkdir(self.path)
 
     def get_file(self, f):
+        '''
+        :param f: a filename
+        :type f: string
+        :returns: a full path containing the provided filename
+        '''
         return os.sep.join([self.path, f])
 
 

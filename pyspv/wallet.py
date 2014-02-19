@@ -17,14 +17,15 @@ class DuplicateWalletItem(Exception):
 
 class Wallet:
     '''The Wallet is responsible for managing private keys and spendable inputs'''
-    def __init__(self, spv=None, monitors=[]):
+    def __init__(self, spv, monitors=None):
         self.spv = spv
         self.payment_types = set()
         self.payment_types_by_name = {}
         self.wallet_file = self.spv.config.get_file("wallet")
         self.wallet_lock = threading.Lock()
+        self.tx_lock = threading.Lock()
         self.temp_collections_lock = threading.Lock()
-        self.monitors = [m(spv) for m in monitors]
+        self.monitors = [m(spv) for m in ([] if monitors is None else monitors)]
         self.spend_classes = {}
         self.collection_sizes = {}
         self.temp_collections = {}
@@ -34,6 +35,7 @@ class Wallet:
             for sc in m.spend_classes:
                 self.spend_classes[sc.__name__] = sc
 
+    def load(self):
         with self.wallet_lock:
             with closing(shelve.open(self.wallet_file)) as d:
                 if 'creation_time' not in d:
@@ -62,8 +64,8 @@ class Wallet:
             self.collection_sizes[collection_name] = len(collections[collection_name])
             for item, metadata in collections[collection_name].items():
                 for m in self.monitors:
-                    if hasattr(m, 'on_' + collection_name):
-                        getattr(m, 'on_' + collection_name)(self, item, metadata)
+                    if hasattr(m, 'on_new_' + collection_name):
+                        getattr(m, 'on_new_' + collection_name)(item, metadata)
 
         self.spends = {}
         self.spends_by_index = []
@@ -77,12 +79,12 @@ class Wallet:
                 'spend'   : spend,
             }
             self.spends_by_index.append(spend_hash)
-            if not spend.is_spent():
+            if not spend.is_spent(self.spv):
                 self.balance[spend.category] += spend.amount
                 self.balance_spends.add(spend_hash)
             for m in self.monitors:
-                if hasattr(m, 'on_spend'):
-                    getattr(m, 'on_spend')(self, spend)
+                if hasattr(m, 'on_new_spend'):
+                    getattr(m, 'on_new_spend')(spend)
 
         if self.spv.logging_level <= INFO:
             print('[WALLET] loaded with balance of {} BTC'.format(dict(self.balance)))
@@ -117,8 +119,8 @@ class Wallet:
             self.collection_sizes[collection_name] += 1
 
             for m in self.monitors:
-                if hasattr(m, 'on_' + collection_name):
-                    getattr(m, 'on_' + collection_name)(self, item, metadata)
+                if hasattr(m, 'on_new_' + collection_name):
+                    getattr(m, 'on_new_' + collection_name)(item, metadata)
 
     def update(self, collection_name, item, metadata):
         '''item must be pickle serializable and implement __hash__ and __eq__'''
@@ -206,17 +208,17 @@ class Wallet:
                 if spend.category not in self.balance:
                     self.balance[spend.category] = 0
 
-                if spend.is_spent() and spend_hash in self.balance_spends:
+                if spend.is_spent(self.spv) and spend_hash in self.balance_spends:
                     self.balance[spend.category] -= spend.amount
                     self.balance_spends.remove(spend_hash)
 
-                if not spend.is_spent() and spend_hash not in self.balance_spends:
+                if not spend.is_spent(self.spv) and spend_hash not in self.balance_spends:
                     self.balance[spend.category] += spend.amount
                     self.balance_spends.add(spend_hash)
 
                 for m in self.monitors:
-                    if hasattr(m, 'on_spend'):
-                        getattr(m, 'on_spend')(self, spend)
+                    if hasattr(m, 'on_new_spend'):
+                        getattr(m, 'on_new_spend')(spend)
 
                 if self.spv.logging_level <= INFO:
                     print('[WALLET] added {} to wallet category {} (new balance={})'.format(spend.amount, spend.category, self.balance[spend.category]))
@@ -248,11 +250,11 @@ class Wallet:
                 if spend.category not in self.balance:
                     self.balance[spend.category] = 0
 
-                if spend.is_spent() and spend_hash in self.balance_spends:
+                if spend.is_spent(self.spv) and spend_hash in self.balance_spends:
                     self.balance[spend.category] -= old_spend['spend'].amount
                     self.balance_spends.remove(spend_hash)
 
-                if not spend.is_spent() and spend_hash not in self.balance_spends:
+                if not spend.is_spent(self.spv) and spend_hash not in self.balance_spends:
                     self.balance[spend.category] += spend.amount
                     self.balance_spends.add(spend_hash)
 
@@ -397,11 +399,17 @@ class Wallet:
 
         return result
 
+    def on_block(self, block):
+        with self.tx_lock:
+            for m in self.monitors:
+                if hasattr(m, 'on_block'):
+                    getattr(m, 'on_block')(block)
 
     def on_tx(self, tx):
-        for m in self.monitors:
-            if hasattr(m, 'on_tx'):
-                getattr(m, 'on_tx')(tx)
+        with self.tx_lock:
+            for m in self.monitors:
+                if hasattr(m, 'on_tx'):
+                    getattr(m, 'on_tx')(tx)
 
 class Spend:
     def __init__(self, coin, category, amount):

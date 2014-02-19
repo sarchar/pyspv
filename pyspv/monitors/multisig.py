@@ -3,11 +3,58 @@ from .. import base58
 
 from .basemonitor import BaseMonitor
 
+from ..keys import PrivateKey, PublicKey
 from ..script import *
 from ..serialize import Serialize
-from ..transaction import TransactionOutput, TransactionPrevOut
+from ..transaction import TransactionInput, TransactionOutput, TransactionPrevOut
 from ..util import *
 from ..wallet import InvalidAddress, Spend
+
+class MultisigScriptHashSpendInputCreator:
+    '''Input creators need to define the following class properties:
+        self.prevout : a TransactionPrevOut
+        self.script  : a byte sequence containing scriptPubKey
+        self.sequence: the sequence number of the final TransactionInput
+
+        Everything else can be class-specific, but the above are used for serialization and signing
+    '''
+    def __init__(self, spv, prevout, script, sequence, address_info):
+        self.spv = spv
+        self.prevout = prevout
+        self.sequence = sequence
+        self.address_info = address_info
+
+        # P2SH signs the redemption script, not the scriptPubKey
+        self.script_p2sh = script
+        self.script = hexstring_to_bytes(address_info['redemption_script'], reverse=False)
+
+    def create_tx_input(self, hash_for_signature, flags):
+        script = Script()
+        script.push_op(OP_0)
+
+        n = 0
+        for public_key_bytes in self.address_info['public_keys']:
+            if n >= self.address_info['nreq']:
+                break
+            public_key_metadata = self.spv.wallet.get_temp('public_key', PublicKey(public_key_bytes))
+            if public_key_metadata is not None and 'private_key' in public_key_metadata:
+                private_key = public_key_metadata['private_key']
+                signature = private_key.sign(hash_for_signature)
+                script.push_bytes(signature + bytes([flags]))
+                n += 1
+
+        if n < self.address_info['nreq']:
+            raise Exception("signature error: not enough signatures for Multisignature Spend")
+
+        script.push_bytes(self.script)
+
+        return TransactionInput(prevout=self.prevout, script=script)
+
+    def estimated_script_size(self):
+        # signatures are at most 73 bytes, there are nreq of them
+        # plus 1 byte for the signature hash type on each sig
+        # plus probably 2 bytes for the redemption script size, plus the redemption script iself
+        return (73 + 1) * self.address_info['nreq'] + 2 + len(self.script)
 
 class MultisigScriptHashSpend(Spend):
     def __init__(self, coin, category, amount, address, prevout, script, address_info, spent_in=None):
@@ -23,18 +70,26 @@ class MultisigScriptHashSpend(Spend):
         '''one spend is equal to another only based on the prevout value'''
         return self.coin.hash(self.prevout.serialize())
 
-    def is_spent(self):
-        return len(self.spent_in) != 0
+    def is_spent(self, spv):
+        return any(not spv.txdb.is_conflicted(tx_hash) for tx_hash in self.spent_in)
 
     def is_spendable(self, spv):
-        # TODO check spent_in txids to see if any haven't confirmed for a while and allow respending after some time?
-        return not self.is_spent() and self.get_confirmations(spv) >= self.coin.TRANSACTION_CONFIRMATION_DEPTH
+        return not self.is_spent(spv) and self.get_confirmations(spv) >= self.coin.TRANSACTION_CONFIRMATION_DEPTH and self.has_signing_keys(spv)
+
+    def has_signing_keys(self, spv):
+        n = 0
+        for public_key_bytes in self.address_info['public_keys']:
+            public_key = PublicKey(public_key_bytes)
+            public_key_metadata = spv.wallet.get_temp('public_key', public_key)
+            if public_key_metadata is not None and 'private_key' in public_key_metadata:
+                n += 1
+        return n >= self.address_info['nreq']
 
     def get_confirmations(self, spv):
         return spv.txdb.get_tx_depth(self.prevout.tx_hash)
         
     def create_input_creators(self, spv):
-        pksic = PubKeySpendInputCreator(spv, self.prevout, self.script, 0xffffffff, self.address_info)
+        pksic = MultisigScriptHashSpendInputCreator(spv, self.prevout, self.script, 0xffffffff, self.address_info)
         return [pksic]
 
     def serialize(self):
@@ -70,33 +125,64 @@ class MultisigScriptHashPaymentMonitor(BaseMonitor):
 
     def __init__(self, spv):
         BaseMonitor.__init__(self, spv)
-        self.prevouts = {}
+        self.spend_by_prevout = {}
         self.script_addresses = {}
 
-    def on_spend(self, wallet, spend):
+    def on_new_spend(self, spend):
+        # We only care about multisig spends
         if not isinstance(spend, MultisigScriptHashSpend):
-            # We only care about script hash spends
             return
 
-        # TODO check if spend.redemption_script is a multisig redemption script
-
         # Save spend to check if it gets spent
-        self.prevouts[spend.prevout] = spend
+        self.spend_by_prevout[spend.prevout] = spend
 
-    def on_redemption_script(self, wallet, redemption_script, metadata):
+    def on_new_redemption_script(self, redemption_script, metadata):
+        # parse redemption_script to verify it's a multisig redemption script
+        if len(redemption_script) < 3 or redemption_script[-1] != OP_CHECKMULTISIG:
+            return
+
+        if redemption_script[0] == OP_0:
+            nreq = 0
+        else:
+            nreq = redemption_script[0] - OP_1 + 1
+
+        if nreq < 0 or nreq > 9:
+            return
+
+        # Get the pubkeys out of the script
+        index = 1
+        public_keys = []
+        while index < len(redemption_script) - 2:
+            size = redemption_script[index]
+            if size not in (33, 65): # not a public key, too bad
+                return
+            if len(redemption_script) - (index + 1) < size:
+                return
+            public_keys.append(redemption_script[index+1:index+1+size])
+            if (size == 33 and public_keys[-1][0] != 0x02) or (size == 65 and public_keys[-1][0] not in (0x03, 0x04)):
+                return
+            index += size + 1
+
+        if (redemption_script[-2] - OP_1 + 1) != len(public_keys):
+            return
+
         address = base58_check(self.spv.coin, self.spv.coin.hash160(redemption_script), version_bytes=self.spv.coin.P2SH_ADDRESS_VERSION_BYTES)
 
-        # TODO parse redemption_script for nreq, check if we own enough pubkeys to sign for it, etc
-        # TODO on_public_key should check if any of our redemption_scripts reference that pubkey and if a private key is available for signing, etc
+        # TODO on_public_key could check if any of our redemption_scripts reference that pubkey and if a private key is available for signing, etc
 
         self.script_addresses[address] = {
             'address'          : address,
             'redemption_script': bytes_to_hexstring(redemption_script, reverse=False),
+            'nreq'             : nreq,
+            'public_keys'      : public_keys,
         }
 
-        wallet.add_temp('address', address, {'redemption_script': redemption_script})
+        self.spv.wallet.add_temp('address', address, {'redemption_script': redemption_script})
 
-        print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] watching for multi-signature payment to {}'.format(address))
+        if self.spv.logging_level <= INFO:
+            print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] watching for multi-signature payment to {}'.format(address))
+        if self.spv.logging_level <= DEBUG:
+            print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] {} of {} public_keys: {}'.format(nreq, len(public_keys), ', '.join(bytes_to_hexstring(public_key, reverse=False) for public_key in public_keys)))
 
     def on_tx(self, tx):
         tx_saved = False
@@ -104,16 +190,78 @@ class MultisigScriptHashPaymentMonitor(BaseMonitor):
 
         # check inputs, they might spend coins from the wallet
         for i, input in enumerate(tx.inputs):
-            pass
+            spend = self.spend_by_prevout.get(input.prevout, None)
+            if spend is not None:
+                # Have we've seen this spend before?
+                if tx_hash in spend.spent_in:
+                    continue
+
+                # Update this Spend with a new spend tx
+                spend.spent_in.add(tx_hash)
+                self.spv.wallet.update_spend(spend)
+
+                if self.spv.logging_level <= INFO:
+                    print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] tx {} spends {} amount={}'.format(bytes_to_hexstring(tx_hash), input.prevout, self.spv.coin.format_money(spend.amount)))
+
+                continue
+
+            # check this input and if it's a multisig p2sh spend (OP_0 <sig> .. <sig> <redemption_script>) and check to see if 
+            # the redemption script is in our wallet. if it is, remember this spend for later.
+            if len(input.script.program) == 0 or input.script.program[0] != OP_0:
+                continue
+
+            # Break the program into data pushes...
+            index = 1
+            pushes = []
+            while index < len(input.script.program):
+                size = input.script.program[index]
+                if size == OP_PUSHDATA1 and (index+1) < len(input.script.program):
+                    size = input.script.program[index+1]
+                    index += 2
+                elif size == OP_PUSHDATA2 and (index+2) < len(input.script.program):
+                    size = input.script.program[index+1] | (input.script.program[index+2] << 8)
+                    index += 3
+                elif size == OP_PUSHDATA4 and (index+4) < len(input.script.program):
+                    size = input.script.program[index+1] | (input.script.program[index+2] << 8) | (input.script.program[index+3] << 16) | (input.script.program[index+4] << 24)
+                    index += 5
+                pushes.append(input.script.program[index:index+size])
+                index += size
+
+            # The last data push has to be our redemption script
+            if len(pushes) == 0:
+                continue
+
+            redemption_script = pushes[-1]
+            address = base58_check(self.spv.coin, self.spv.coin.hash160(redemption_script), version_bytes=self.spv.coin.P2SH_ADDRESS_VERSION_BYTES)
+            address_info = self.script_addresses.get(address, None)
+            if address_info is None:
+                continue
+
+            # Yes, be sure to save the tx
+            self.spv.txdb.save_tx(tx)
+
+            # Add this spending transaction to the list of spent_in transaction ids for use whenever the payment is received
+            unknown_redemption_script_spend_key = (input.prevout.tx_hash, input.prevout.n)
+            unknown_redemption_script_spend_metadata = self.spv.wallet.get('unknown_redemption_script_spends', unknown_redemption_script_spend_key)
+            if unknown_redemption_script_spend_metadata is not None:
+                unknown_redemption_script_spend_metadata['spent_in'].append(tx_hash)
+                self.spv.wallet.update('unknown_redemption_script_spends', unknown_redemption_script_spend_key, unknown_redemption_script_spend_metadata)
+            else:
+                unknown_redemption_script_spend_metadata = {'spent_in': [tx_hash]}
+                self.spv.wallet.add('unknown_redemption_script_spends', unknown_redemption_script_spend_key, unknown_redemption_script_spend_metadata)
+
+            if self.spv.logging_level <= DEBUG:
+                print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] tx {} spends {} from our wallet but we dont know the spend yet!'.format(bytes_to_hexstring(tx_hash), input.prevout))
 
         for i, output in enumerate(tx.outputs):
+            # Analyze the script for P2SH
             script = output.script.program
-
             if len(script) == 23 and script[0] == OP_HASH160 and script[1] == 20 and script[-1] == OP_EQUAL:
                 redemption_script_hash = script[2:22]
             else:
                 continue
 
+            # Check to see if we care about this scripthash
             address = base58_check(self.spv.coin, redemption_script_hash, version_bytes=self.spv.coin.P2SH_ADDRESS_VERSION_BYTES)
             address_info = self.script_addresses.get(address, None)
             if address_info is None:
@@ -121,22 +269,24 @@ class MultisigScriptHashPaymentMonitor(BaseMonitor):
 
             self.spv.txdb.save_tx(tx)
 
-            # We care about this payment
+            # Build a multisig payment
             # TODO - distinguish between the ones we can/can't spend
             prevout = TransactionPrevOut(tx_hash, i)
             spend = MultisigScriptHashSpend(self.spv.coin, 'default', output.amount, address, prevout, script, address_info)
-            if self.spv.wallet.add_spend(spend):
-                #! unknown_spend_key = (tx_hash, i)
-                #! unknown_spend_metadata = self.spv.wallet.get('unknown_spend', unknown_spend_key)
-                #! if unknown_spend_metadata is not None:
-                #!     for tx_hash in unknown_spend_metadata['spent_in']:
-                #!         # this spend is spent already
-                #!         spend.spent_in.add(tx_hash)
-                #!     self.wallet.update_spend(spend)
-                    
-                if self.spv.logging_level <= INFO:
-                    print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] processed payment of {} to {}'.format(output.amount, address))
-            else:
+
+            unknown_redemption_script_spend_key = (tx_hash, i)
+            unknown_redemption_script_spend_metadata = self.spv.wallet.get('unknown_redemption_script_spend', unknown_redemption_script_spend_key)
+            if unknown_redemption_script_spend_metadata is not None:
+                # this spend is spent already
+                for tx_hash in unknown_redemption_script_spend_metadata['spent_in']:
+                    spend.spent_in.add(tx_hash)
+ 
+            if not self.spv.wallet.add_spend(spend):
                 if self.spv.logging_level <= DEBUG:
                     print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] payment of {} to {} already seen'.format(output.amount, address))
+                continue
+
+                   
+            if self.spv.logging_level <= INFO:
+                print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] processed payment of {} to {}'.format(output.amount, address))
 

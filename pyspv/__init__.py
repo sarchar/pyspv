@@ -70,6 +70,7 @@ class pyspv:
         self.txdb = txdb.TransactionDatabase(spv=self)
 
         self.wallet = wallet.Wallet(spv=self, monitors=[PubKeyPaymentMonitor, MultisigScriptHashPaymentMonitor])
+        self.wallet.load()
 
         self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, listen=listen)
         self.network_manager.start()
@@ -135,27 +136,23 @@ class pyspv:
         self.network_manager.add_to_inventory(tx_inv, tx, network.Manager.INVENTORY_FLAG_MUST_CONFIRM if must_confirm else 0)
 
     def on_tx(self, tx):
-        '''Called for every transaction seen on the network, whether it come from a block or relayed separately.
+        '''Called for every transaction seen on the network, not including those found in blocks.
 
         If you override this method, be sure to call :py:meth:`pyspv.on_tx`. Otherwise, the wallet will not see any payments.'''
         self.wallet.on_tx(tx)
+        self.txdb.on_tx(tx)
 
     def on_block(self, block):
         '''Called for every block seen on the network, whether it ends up part of the blockchain or not.
 
-        If you override this method, be sure to call :py:meth:`pyspv.on_tx` for each transaction in the block
-        or only call :py:meth:`pyspv.on_block`. Otherwise, the wallet will not see payments in this block.
+        If you override this method, be sure to call :py:meth:`pyspv.on_block`.  Otherwise, the wallet will not see payments in this block.
 
         .. note:: 
            
            This function is not called for block headers syncing, only full blocks.
         '''
-        block_hash = block.header.hash()
-        for tx in block.transactions:
-            # Calling on_tx allows the wallet to process the transaction and eventually call txdb.save_tx so
-            # that bind_tx works successfully
-            self.on_tx(tx)
-            self.txdb.bind_tx(tx.hash(), block_hash)
+        self.wallet.on_block(block)
+        self.txdb.on_block(block)
 
     def on_block_added(self, block_header, block_height):
         '''Called when the blockchain is extended to a height of *block_height* with the block specified by *block_header*.

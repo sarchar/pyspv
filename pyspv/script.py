@@ -1,5 +1,6 @@
 
 OP_FALSE     = 0
+OP_0         = 0
 
 OP_PUSHDATA1 = 0x4c
 OP_PUSHDATA2 = 0x4d
