@@ -7,6 +7,8 @@ import threading
 import time
 import traceback
 
+from . import socks
+
 from .block import Block, BlockHeader
 from .bloom import Bloom
 from .inv import Inv
@@ -51,7 +53,7 @@ class Manager(threading.Thread):
     INVENTORY_FLAG_HOLD_FOREVER = 0x01
     INVENTORY_FLAG_MUST_CONFIRM = 0x02
 
-    def __init__(self, spv=None, peer_goal=1, listen=('', 0)):
+    def __init__(self, spv=None, peer_goal=1, listen=('', 0), tor=False):
         threading.Thread.__init__(self)
         self.spv = spv
         self.peer_goal = peer_goal
@@ -73,6 +75,11 @@ class Manager(threading.Thread):
 
         self.headers_request = None
         self.headers_request_last_peer = None
+
+        self.tor = tor
+        if tor:
+            # Using Tor disables incoming connections
+            listen = None
 
         if listen is not None:
             if listen[0] == '':
@@ -602,7 +609,11 @@ class Peer(threading.Thread):
             self.running = False
 
     def make_connection(self):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if self.manager.tor:
+            self.socket = socks.socksocket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.setproxy(socks.PROXY_TYPE_SOCKS5, *self.manager.spv.args.torproxy)
+        else:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.settimeout(5)
 
         try:

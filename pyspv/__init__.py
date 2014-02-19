@@ -1,4 +1,5 @@
 import argparse
+import ipaddress
 import sys
 import time
 
@@ -42,7 +43,7 @@ class pyspv:
     :type coin: coin class
     '''
 
-    def __init__(self, app_name, testnet=False, peer_goal=8, logging_level=WARNING, listen=('', 0), coin=Bitcoin):
+    def __init__(self, app_name, testnet=False, peer_goal=8, logging_level=WARNING, listen=('', 0), coin=Bitcoin, tor=False):
         '''
         '''
         self.app_name = app_name
@@ -56,6 +57,9 @@ class pyspv:
 
         if self.args.testnet:
             testnet = True
+
+        if self.args.tor:
+            tor = True
 
         self.coin = coin.Testnet if testnet else coin
 
@@ -72,15 +76,34 @@ class pyspv:
         self.wallet = wallet.Wallet(spv=self, monitors=[PubKeyPaymentMonitor, MultisigScriptHashPaymentMonitor])
         self.wallet.load()
 
-        self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, listen=listen)
+        self.network_manager = network.Manager(spv=self, peer_goal=peer_goal, listen=listen, tor=tor)
         self.network_manager.start()
 
     def __parse_arguments(self):
         parser = argparse.ArgumentParser()
         parser.add_argument('--resync', action='store_const', default=False, const=True)
         parser.add_argument('--testnet', action='store_const', default=False, const=True)
+        parser.add_argument('--tor', action='store_const', default=False, const=True)
+        parser.add_argument('--torproxy', type=str, default=None, help='specify tor proxy (default 127.0.0.1:9050, implies --tor)')
         args, remaining = parser.parse_known_args()
         sys.argv = [sys.argv[0]] + remaining
+
+        if args.torproxy is not None:
+            if ':' in args.torproxy:
+                addr, port = args.torproxy.split(':')
+                port = int(port)
+            else:
+                addr = args.torproxy
+                port = 9050
+
+            # Raise an exception if the provided address is invalid
+            ipaddress.IPv4Address(addr)
+            assert 0 <= port <= 65535
+            args.torproxy = (addr, port)
+            args.tor = True
+        else:
+            args.torproxy = ('127.0.0.1', 9050)
+
         return args
 
     def shutdown(self):
