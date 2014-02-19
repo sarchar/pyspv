@@ -79,10 +79,21 @@ def getnewaddress(label='', compressed=0):
     return pk.get_public_key(compressed).as_address(spv.coin)
 
 @exception_printer
-def listspends():
+def getnewpubkey(label='', compressed=0):
+    compressed = bool(int(compressed))
+    pk = pyspv.keys.PrivateKey.create_new()
+    spv.wallet.add('private_key', pk, {'label': label})
+    return pk.get_public_key(compressed).as_hex()
+
+@exception_printer
+def listspends(include_spent=False):
+    if str(include_spent).lower() in ('1', 'true'):
+        include_spent = True
     spendable = []
     not_spendable = []
     for spend in spv.wallet.spends.values():
+        if not include_spent and spend['spend'].is_spent(spv):
+            continue
         if spend['spend'].is_spendable(spv):
             spendable.append(str(spend['spend']))
         else:
@@ -113,9 +124,21 @@ def dumpprivkey(address_or_pubkey):
     return metadata['private_key'].as_wif(spv.coin, public_key.is_compressed())
 
 @exception_printer
-def genmultisig(nreq, *pubkeys):
+def genmultisig(nreq, mtotal, *pubkeys):
+    '''Generate a new multisignature address and redemption script that requires `nreq' signatures to spend and provides a possible `mtotal'.
+    If public keys are provided on the command line, those are used instead of generating new ones.'''
+
     nreq = int(nreq)
-    assert 1 <= nreq <= len(pubkeys)
+    mtotal = int(mtotal)
+    pubkeys = list(pubkeys)
+    assert 0 <= nreq <= mtotal
+    assert len(pubkeys) <= mtotal
+
+    # Create new keys if necessary
+    while len(pubkeys) < mtotal:
+        pk = pyspv.keys.PrivateKey.create_new()
+        spv.wallet.add('private_key', pk, {'label': ''})
+        pubkeys.append(pk.get_public_key(compressed=True).as_hex())
 
     pubkeys = [pyspv.keys.PublicKey.from_hex(pubkey) for pubkey in pubkeys]
     pubkeys.sort()
