@@ -44,16 +44,33 @@ def sendtoaddress(address, amount, memo=''):
 
     # Determine the payment type based on the version byte of the address provided
     # (I don't think this is the proper long term solution to different payment types...)
-    address_bytes = int.to_bytes(pyspv.base58.decode(address), spv.coin.ADDRESS_BYTE_LENGTH, 'big')
+    try:
+        address_bytes = int.to_bytes(pyspv.base58.decode(address), spv.coin.ADDRESS_BYTE_LENGTH, 'big')
+    except OverflowError:
+        address_bytes = b''
     k = len(spv.coin.ADDRESS_VERSION_BYTES)
     if address_bytes[:k] == spv.coin.ADDRESS_VERSION_BYTES:
         transaction_builder.process(pyspv.PubKeyPayment(address, spv.coin.parse_money(amount)))
     else:
+        try:
+            address_bytes = int.to_bytes(pyspv.base58.decode(address), spv.coin.P2SH_ADDRESS_BYTE_LENGTH, 'big')
+        except OverflowError:
+            address_bytes = b''
         k = len(spv.coin.P2SH_ADDRESS_VERSION_BYTES)
         if address_bytes[:k] == spv.coin.P2SH_ADDRESS_VERSION_BYTES:
             transaction_builder.process(pyspv.MultisigScriptHashPayment(address, spv.coin.parse_money(amount)))
         else:
-            return "error: bad address {}".format(address)
+            try:
+                # Drop last 4 bytes because of the checksum
+                address_bytes = int.to_bytes(pyspv.base58.decode(address), spv.coin.STEALTH_ADDRESS_BYTE_LENGTH, 'big')[:-4]
+            except OverflowError:
+                address_bytes = b''
+            k = len(spv.coin.STEALTH_ADDRESS_VERSION_BYTES)
+            j = len(spv.coin.STEALTH_ADDRESS_SUFFIX_BYTES)
+            if address_bytes[:k] == spv.coin.STEALTH_ADDRESS_VERSION_BYTES and address_bytes[-j:] == spv.coin.STEALTH_ADDRESS_SUFFIX_BYTES: 
+                transaction_builder.process(pyspv.StealthAddressPayment(address, spv.coin.parse_money(amount)))
+            else:
+                return "error: bad address {}".format(address)
 
     tx = transaction_builder.finish(shuffle_inputs=True, shuffle_outputs=True)
 
@@ -81,6 +98,12 @@ def getnewaddress(label='', compressed=False):
     pk = pyspv.keys.PrivateKey.create_new()
     spv.wallet.add('private_key', pk, {'label': label})
     return pk.get_public_key(compressed).as_address(spv.coin)
+
+@exception_printer
+def getnewstealthaddress(label=''):
+    pk = pyspv.keys.PrivateKey.create_new()
+    spv.wallet.add('private_key', pk, {'label': label, 'stealth_payments': True})
+    return pyspv.base58_check(spv.coin, pk.get_public_key(True).pubkey, version_bytes=spv.coin.STEALTH_ADDRESS_VERSION_BYTES, suffix_bytes=spv.coin.STEALTH_ADDRESS_SUFFIX_BYTES)
 
 @exception_printer
 def getnewpubkey(label='', compressed=False):
@@ -201,6 +224,7 @@ def server_main():
 
     rpc_server = SimpleXMLRPCServer((RPC_LISTEN_ADDRESS, RPC_LISTEN_PORT), allow_none=True)
     rpc_server.register_function(getnewaddress)
+    rpc_server.register_function(getnewstealthaddress)
     rpc_server.register_function(getnewpubkey)
     rpc_server.register_function(getbalance)
     rpc_server.register_function(sendtoaddress)

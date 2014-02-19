@@ -54,11 +54,14 @@ def hexstring_to_bytes(s, reverse=True):
     else:
         return bytes([int(s[x:x+2], 16) for x in range(0, len(s), 2)])
 
-def base58_check(coin, src, version_bytes=0):
+def base58_check(coin, src, version_bytes=0, suffix_bytes=b''):
     if isinstance(version_bytes, int):
         version_bytes = bytes([version_bytes])
 
-    src = version_bytes + src
+    if isinstance(suffix_bytes, int):
+        suffix_bytes = bytes([suffix_bytes])
+
+    src = version_bytes + src + suffix_bytes
 
     r = coin.hash(src)
     checksum = r[:4]

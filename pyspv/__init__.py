@@ -21,6 +21,8 @@ from .payments.pubkey import PubKeyChange, PubKeyPayment
 from .monitors.multisig import MultisigScriptHashPaymentMonitor
 from .payments.multisig import MultisigScriptHashPayment
 
+from .payments.stealth import StealthAddressPayment
+
 from .util import *
 
 VERSION = 'pyspv 0.0.1-alpha1'

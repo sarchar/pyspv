@@ -8,10 +8,12 @@ try:
 except:
     ssl_library = ctypes.cdll.LoadLibrary('libssl.so')
 
-NID_secp160k1 = 708
 NID_secp256k1 = 714
+secp256k1_order = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 
 class PublicKey:
+    '''Also an ECC point'''
+
     def __init__(self, pubkey):
         assert len(pubkey) in (33, 65) and pubkey[0] in (0x02, 0x03, 0x04)
         self.pubkey = pubkey
@@ -24,6 +26,129 @@ class PublicKey:
 
     def __lt__(self, other):
         return self.pubkey < other.pubkey
+
+    def add_constant(self, c):
+        '''this + c * generator'''
+        k = ssl_library.EC_KEY_new_by_curve_name(NID_secp256k1)
+        
+        group = ssl_library.EC_KEY_get0_group(k)
+        point = ssl_library.EC_POINT_new(group)
+
+        # int EC_POINT_set_affine_coordinates_GFp(const EC_GROUP *group, EC_POINT *p,
+        #     const BIGNUM *x, const BIGNUM *y, BN_CTX *ctx);
+        # 
+        # int EC_POINT_set_compressed_coordinates_GFp(const EC_GROUP *group, EC_POINT *p,
+        #     const BIGNUM *x, int y_bit, BN_CTX *ctx);
+
+        if self.is_compressed():
+            x_storage = ctypes.create_string_buffer(self.pubkey[1:33])
+            bignum_x_coordinate = ssl_library.BN_new()
+            ssl_library.BN_bin2bn(x_storage, 32, bignum_x_coordinate)
+
+            bignum_y_coordinate = None
+
+            r = ssl_library.EC_POINT_set_compressed_coordinates_GFp(group, point, bignum_x_coordinate, self.pubkey[0] & 0x01, None)
+        else:
+            x_storage = ctypes.create_string_buffer(self.pubkey[1:33])
+            bignum_x_coordinate = ssl_library.BN_new()
+            ssl_library.BN_bin2bn(x_storage, 32, bignum_x_coordinate)
+
+            y_storage = ctypes.create_string_buffer(self.pubkey[33:65])
+            bignum_y_coordinate = ssl_library.BN_new()
+            ssl_library.BN_bin2bn(y_storage, 32, bignum_y_coordinate)
+
+            r = ssl_library.EC_POINT_set_affine_coordinates(group, point, bignum_x_coordinate, bignum_y_coordinate, None)
+
+        # Load c into BIGNUM
+        storage = ctypes.create_string_buffer(int.to_bytes(c, 32, 'big'))
+        bignum_c = ssl_library.BN_new()
+        ssl_library.BN_bin2bn(storage, 32, bignum_c)
+
+        # Load 1 into BIGNUM
+        storage_one = ctypes.create_string_buffer(int.to_bytes(1, 32, 'big'))
+        bignum_one = ssl_library.BN_new()
+        ssl_library.BN_bin2bn(storage_one, 32, bignum_one)
+
+        # result = generator * bignum_c + self
+        result = ssl_library.EC_POINT_new(group)
+        ssl_library.EC_POINT_mul(group, result, bignum_c, point, bignum_one, None)
+
+        # Load the point into our EC_KEY and extract it
+        ssl_library.EC_KEY_set_public_key(k, result)
+        size = ssl_library.i2o_ECPublicKey(k, 0)
+        result_storage = ctypes.create_string_buffer(size)
+        pointer_result_storage = ctypes.pointer(result_storage)
+        ssl_library.i2o_ECPublicKey(k, ctypes.byref(pointer_result_storage))
+        public_key = result_storage.raw
+
+        ssl_library.EC_POINT_free(result)
+        ssl_library.BN_free(bignum_one)
+        ssl_library.BN_free(bignum_c)
+        ssl_library.BN_free(bignum_x_coordinate)
+        if bignum_y_coordinate is not None:
+            ssl_library.BN_free(bignum_y_coordinate)
+        ssl_library.EC_POINT_free(point)
+        ssl_library.EC_KEY_free(k)
+
+        return PublicKey(PublicKey.compress(public_key)) if self.is_compressed() else PublicKey(public_key)
+
+    def multiply(self, c):
+        k = ssl_library.EC_KEY_new_by_curve_name(NID_secp256k1)
+        
+        group = ssl_library.EC_KEY_get0_group(k)
+        point = ssl_library.EC_POINT_new(group)
+
+        # int EC_POINT_set_affine_coordinates_GFp(const EC_GROUP *group, EC_POINT *p,
+        #     const BIGNUM *x, const BIGNUM *y, BN_CTX *ctx);
+        # 
+        # int EC_POINT_set_compressed_coordinates_GFp(const EC_GROUP *group, EC_POINT *p,
+        #     const BIGNUM *x, int y_bit, BN_CTX *ctx);
+
+        if self.is_compressed():
+            x_storage = ctypes.create_string_buffer(self.pubkey[1:33])
+            bignum_x_coordinate = ssl_library.BN_new()
+            ssl_library.BN_bin2bn(x_storage, 32, bignum_x_coordinate)
+
+            bignum_y_coordinate = None
+
+            r = ssl_library.EC_POINT_set_compressed_coordinates_GFp(group, point, bignum_x_coordinate, self.pubkey[0] & 0x01, None)
+        else:
+            x_storage = ctypes.create_string_buffer(self.pubkey[1:33])
+            bignum_x_coordinate = ssl_library.BN_new()
+            ssl_library.BN_bin2bn(x_storage, 32, bignum_x_coordinate)
+
+            y_storage = ctypes.create_string_buffer(self.pubkey[33:65])
+            bignum_y_coordinate = ssl_library.BN_new()
+            ssl_library.BN_bin2bn(y_storage, 32, bignum_y_coordinate)
+
+            r = ssl_library.EC_POINT_set_affine_coordinates(group, point, bignum_x_coordinate, bignum_y_coordinate, None)
+
+        # Load c into BIGNUM
+        storage = ctypes.create_string_buffer(int.to_bytes(c, 32, 'big'))
+        bignum_c = ssl_library.BN_new()
+        ssl_library.BN_bin2bn(storage, 32, bignum_c)
+
+        # Multiply point * c
+        result = ssl_library.EC_POINT_new(group)
+        ssl_library.EC_POINT_mul(group, result, None, point, bignum_c, None)
+
+        # Load the point into our EC_KEY and extract it
+        ssl_library.EC_KEY_set_public_key(k, result)
+        size = ssl_library.i2o_ECPublicKey(k, 0)
+        result_storage = ctypes.create_string_buffer(size)
+        pointer_result_storage = ctypes.pointer(result_storage)
+        ssl_library.i2o_ECPublicKey(k, ctypes.byref(pointer_result_storage))
+        public_key = result_storage.raw
+
+        ssl_library.EC_POINT_free(result)
+        ssl_library.BN_free(bignum_c)
+        ssl_library.BN_free(bignum_x_coordinate)
+        if bignum_y_coordinate is not None:
+            ssl_library.BN_free(bignum_y_coordinate)
+        ssl_library.EC_POINT_free(point)
+        ssl_library.EC_KEY_free(k)
+
+        return PublicKey(PublicKey.compress(public_key)) if self.is_compressed() else PublicKey(public_key)
 
     def is_compressed(self):
         return self.pubkey[0] in (0x02, 0x03) and len(self.pubkey) == 33
@@ -39,6 +164,8 @@ class PublicKey:
 
     @staticmethod
     def compress(pubkey):
+        if pubkey[0] in (0x02, 0x03):
+            return pubkey
         assert pubkey[0] == 0x04
         x_coord = pubkey[1:33]
         if pubkey[64] & 0x01:
@@ -65,6 +192,13 @@ class PrivateKey:
     def as_wif(self, coin, compressed):
         '''WIF - wallet import format'''
         return base58_check(coin, self.secret + (b'\x01' if compressed else b''), version_bytes=coin.PRIVATE_KEY_VERSION_BYTES)
+
+    def as_int(self):
+        return int.from_bytes(self.secret, 'big')
+
+    def add_constant(self, c):
+        r = (int.from_bytes(self.secret, 'big') + c) % secp256k1_order
+        return PrivateKey(int.to_bytes(r, 32, 'big'))
 
     def get_public_key(self, compressed):
         k = ssl_library.EC_KEY_new_by_curve_name(NID_secp256k1)

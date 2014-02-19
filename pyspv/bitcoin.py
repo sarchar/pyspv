@@ -9,11 +9,15 @@ class InvalidMoney(Exception):
 class Bitcoin:
     NAME                       = 'Bitcoin'
 
-    ADDRESS_VERSION_BYTES      = b'\x00'
-    ADDRESS_BYTE_LENGTH        = 25 # 1 for version byte + 20 for ripemd60 hash + 4 for checksum
-    P2SH_ADDRESS_VERSION_BYTES = b'\x05'
-    P2SH_ADDRESS_BYTE_LENGTH   = 25 # 1 for version byte + 20 for ripemd60 hash + 4 for checksum
-    PRIVATE_KEY_VERSION_BYTES  = b'\x80'
+    ADDRESS_VERSION_BYTES         = b'\x00'
+    ADDRESS_BYTE_LENGTH           = 25 # 1 for version byte + 20 for ripemd60 hash + 4 for checksum
+    P2SH_ADDRESS_VERSION_BYTES    = b'\x05'
+    P2SH_ADDRESS_BYTE_LENGTH      = 25 # 1 for version byte + 20 for ripemd60 hash + 4 for checksum
+    PRIVATE_KEY_VERSION_BYTES     = b'\x80'
+    STEALTH_ADDRESS_VERSION_BYTES = b'\x09'
+    STEALTH_ADDRESS_SUFFIX_BYTES  = b'\x00\x00'
+    STEALTH_ADDRESS_BYTE_LENGTH   = 40 # 33 byte compressed pubkey + 1 version byte + 2 suffix bytes + 4 for checksum
+    
     NETWORK_MAGIC              = bytes([0xF9, 0xBE, 0xB4, 0xD9]) 
 
     TRANSACTION_VERSION = 1
@@ -145,10 +149,11 @@ class Bitcoin:
 
 
 class BitcoinTestnet(Bitcoin):
-    ADDRESS_VERSION_BYTES      = b'\x6f'
-    P2SH_ADDRESS_VERSION_BYTES = bytes([196])
-    PRIVATE_KEY_VERSION_BYTES  = bytes([0x6f + 0x80])
-    NETWORK_MAGIC              = bytes([0x0B, 0x11, 0x09, 0x07])
+    ADDRESS_VERSION_BYTES         = b'\x6f'
+    P2SH_ADDRESS_VERSION_BYTES    = bytes([196])
+    PRIVATE_KEY_VERSION_BYTES     = bytes([0x6f + 0x80])
+    STEALTH_ADDRESS_VERSION_BYTES = bytes([0x09 + 0x80])
+    NETWORK_MAGIC                 = bytes([0x0B, 0x11, 0x09, 0x07])
 
     DEFAULT_PORT = 18333
     
