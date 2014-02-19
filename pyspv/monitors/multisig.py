@@ -179,9 +179,8 @@ class MultisigScriptHashPaymentMonitor(BaseMonitor):
 
         self.spv.wallet.add_temp('address', address, {'redemption_script': redemption_script})
 
-        if self.spv.logging_level <= INFO:
-            print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] watching for multi-signature payment to {}'.format(address))
         if self.spv.logging_level <= DEBUG:
+            print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] watching for multi-signature payment to {}'.format(address))
             print('[MULTISIGSCRIPTHASHPAYMENTMONITOR] {} of {} public_keys: {}'.format(nreq, len(public_keys), ', '.join(bytes_to_hexstring(public_key, reverse=False) for public_key in public_keys)))
 
     def on_tx(self, tx):

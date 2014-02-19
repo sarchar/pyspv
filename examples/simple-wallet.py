@@ -51,7 +51,7 @@ def sendtoaddress(address, amount, memo=''):
     else:
         k = len(spv.coin.P2SH_ADDRESS_VERSION_BYTES)
         if address_bytes[:k] == spv.coin.P2SH_ADDRESS_VERSION_BYTES:
-            transaction_builder.process(pyspv.ScriptHashPayment(address, spv.coin.parse_money(amount)))
+            transaction_builder.process(pyspv.MultisigScriptHashPayment(address, spv.coin.parse_money(amount)))
         else:
             return "error: bad address {}".format(address)
 
