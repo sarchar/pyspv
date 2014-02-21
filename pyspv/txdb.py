@@ -133,6 +133,7 @@ class TransactionDatabase:
         return False
 
     def on_block_removed(self, block_header, block_height):
+        block_hash = block_header.hash()
         with self.db_lock:
             self.blockchain_height -= 1
             if block_hash in self.watched_block_height:
