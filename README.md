@@ -87,7 +87,7 @@ anyonecanpay-add.py
 -------------------
 
 Given a transaction and a spend id, add those inputs and sign them using ANYONECANPAY.  This program, combined with anyonecanpay-new.py
-effectly allows easy creation of (assurance contracts)[https://en.bitcoin.it/wiki/Contracts#Example_3:_Assurance_contracts].
+effectly allows easy creation of [assurance contracts](https://en.bitcoin.it/wiki/Contracts#Example_3:_Assurance_contracts).
 
 documentation
 =============
