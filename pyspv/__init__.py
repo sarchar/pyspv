@@ -52,8 +52,6 @@ class pyspv:
     '''
 
     def __init__(self, app_name, testnet=False, peer_goal=8, logging_level=WARNING, listen=('', 0), coin=Bitcoin, tor=False, sync_block_start=None):
-        '''
-        '''
         self.app_name = app_name
         self.time_offset = 0
         self.logging_level = logging_level
