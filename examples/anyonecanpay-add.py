@@ -3,8 +3,6 @@ import sys
 import traceback
 
 def main():
-    simple_wallet = __import__('simple-wallet')
-
     # We need a wallet, but don't need a network. Set peer_goal to 0
     spv = pyspv.pyspv('pyspv-simple-wallet', logging_level=pyspv.INFO, peer_goal=0, listen=None)
 
