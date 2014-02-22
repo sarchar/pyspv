@@ -69,7 +69,7 @@ def get_output_producer(spv, address, amount):
             if address_bytes[:k] == spv.coin.STEALTH_ADDRESS_VERSION_BYTES and address_bytes[-j:] == spv.coin.STEALTH_ADDRESS_SUFFIX_BYTES: 
                 return pyspv.StealthAddressPayment(address, amount)
             else:
-                return "error: bad address {}".format(address)
+                raise Exception("error: bad address {}".format(address))
 
 @exception_printer
 def sendtoaddress(address, amount, memo=''):
