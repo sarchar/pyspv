@@ -264,7 +264,10 @@ class Wallet:
                 return True
 
 
-    def select_spends(self, categories, amount):
+    def select_spends(self, categories, amount, dont_select=None):
+        if dont_select is None:
+            dont_select = set()
+
         with self.wallet_lock:
             coins_ret = []
 
@@ -277,7 +280,7 @@ class Wallet:
             spends_below = []
 
             # use a random coprime generator to iterate over spends
-            # instead of duplicating the wallet unspent outputs
+            # instead of creating a copy of the wallet's unspent outputs
             p = random_coprime(len(self.spends_by_index))
 
             for i in range(len(self.spends_by_index)):
@@ -285,6 +288,10 @@ class Wallet:
                 spend_dict = self.spends[spend_hash]
 
                 spend = spend_dict['spend']
+
+                if spend.hash() in dont_select:
+                    continue
+
                 if not spend.is_spendable(self.spv):
                     continue
                 

@@ -16,16 +16,18 @@ class PubKeySpendInputCreator:
         self.prevout : a TransactionPrevOut
         self.script  : a byte sequence containing scriptPubKey
         self.sequence: the sequence number of the final TransactionInput
+        self.hash_flags: the flags used for hashing and signing
 
         Everything else can be class-specific, but the above are used for serialization and signing
     '''
 
-    def __init__(self, spv, prevout, script, sequence, address_info):
+    def __init__(self, spv, prevout, script, sequence, address_info, hash_flags):
         self.spv = spv
         self.prevout = prevout
         self.script = script
         self.sequence = sequence
         self.address_info = address_info
+        self.hash_flags = hash_flags
 
     def create_tx_input(self, hash_for_signature, flags):
         public_key = PublicKey.from_hex(self.address_info['public_key_hex'])
@@ -68,8 +70,8 @@ class PubKeySpend(Spend):
     def get_confirmations(self, spv):
         return spv.txdb.get_tx_depth(self.prevout.tx_hash)
         
-    def create_input_creators(self, spv):
-        pksic = PubKeySpendInputCreator(spv, self.prevout, self.script, 0xffffffff, self.address_info)
+    def create_input_creators(self, spv, hash_flags):
+        pksic = PubKeySpendInputCreator(spv, self.prevout, self.script, 0xffffffff, self.address_info, hash_flags)
         return [pksic]
 
     def serialize(self):

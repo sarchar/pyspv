@@ -16,7 +16,6 @@ from .serialize import Serialize
 from .transaction import Transaction
 from .util import *
 
-
 ################################################################################
 ################################################################################
 class OutOfPeers(Exception):

@@ -18,16 +18,18 @@ class StealthAddressSpendInputCreator:
         self.prevout : a TransactionPrevOut
         self.script  : a byte sequence containing scriptPubKey
         self.sequence: the sequence number of the final TransactionInput
+        self.hash_flags: the flags used for hashing and signing
 
         Everything else can be class-specific, but the above are used for serialization and signing
     '''
 
-    def __init__(self, spv, prevout, script, sequence, address_info):
+    def __init__(self, spv, prevout, script, sequence, address_info, hash_flags):
         self.spv = spv
         self.prevout = prevout
         self.script = script
         self.sequence = sequence
         self.address_info = address_info
+        self.hash_flags = hash_flags
 
     def create_tx_input(self, hash_for_signature, flags):
         private_key, _ = PrivateKey.unserialize(self.address_info['private_key'])
@@ -43,11 +45,11 @@ class StealthAddressSpendInputCreator:
         # pubkeys for stealth addresses are always compressed (+1 for size)
         return 2 + 73 + 1 + 1 + 33
 
-# Ths stealth spend is exactly identity to the pubkey spend with the exception
+# Ths stealth spend is exactly identical to the pubkey spend with the exception
 # that it uses a different private key to sign.
 class StealthAddressSpend(PubKeySpend):
-    def create_input_creators(self, spv):
-        sasic = StealthAddressSpendInputCreator(spv, self.prevout, self.script, 0xffffffff, self.address_info)
+    def create_input_creators(self, spv, hash_flags):
+        sasic = StealthAddressSpendInputCreator(spv, self.prevout, self.script, 0xffffffff, self.address_info, hash_flags)
         return [sasic]
 
 class StealthAddressPaymentMonitor(BaseMonitor):
@@ -74,6 +76,7 @@ class StealthAddressPaymentMonitor(BaseMonitor):
                 print('[STEALTHADDRESSPAYMENTMONITOR] watching for stealth payments to {}'.format(private_key.get_public_key(True).as_address(self.spv.coin)))
 
     def on_tx(self, tx):
+        return # TODO right now OpenSSL breaks on 64-bit MT
         tx_hash = tx.hash()
 
         # check inputs, they might spend coins from the wallet

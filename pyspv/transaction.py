@@ -146,7 +146,8 @@ class UnsignedTransactionInput:
     def __init__(self, input_creator):
         self.input_creator = input_creator
 
-    def sign(self, tx, input_index, flags):
+    def sign(self, tx, input_index):
+        flags = self.input_creator.hash_flags
         hash_for_signature = tx.hash_for_signature(input_index, flags)
         tx_input = self.input_creator.create_tx_input(hash_for_signature, flags)
         return tx_input

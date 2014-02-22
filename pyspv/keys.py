@@ -1,4 +1,5 @@
 import ctypes
+import threading
 
 from .serialize import Serialize, SerializeDataTooShort
 from .util import *
@@ -7,6 +8,15 @@ try:
     ssl_library = ctypes.cdll.LoadLibrary('libeay32.dll')
 except:
     ssl_library = ctypes.cdll.LoadLibrary('libssl.so')
+
+ssl_library.EC_KEY_new.restype = ctypes.c_void_p
+ssl_library.EC_KEY_new_by_curve_name.restype = ctypes.c_void_p
+
+ssl_library.OPENSSL_no_config()
+ssl_library.SSL_library_init()
+ssl_library.SSL_load_error_strings()
+
+CRYPTO_LOCK = 1
 
 NID_secp256k1 = 714
 secp256k1_order = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
@@ -223,6 +233,7 @@ class PrivateKey:
         ssl_library.EC_POINT_free(point)
         ssl_library.BN_free(bignum_private_key)
         ssl_library.EC_KEY_free(k)
+
         return PublicKey(PublicKey.compress(public_key) if compressed else public_key)
 
     def sign(self, hash):
@@ -285,4 +296,24 @@ class PrivateKey:
         if len(secret) < 32:
             raise SerializeDataTooShort()
         return PrivateKey(secret), data[32:]
+
+
+openssl_locks = [threading.Lock() for _ in range(ssl_library.CRYPTO_num_locks())]
+openssl_locking_function = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_int)
+openssl_threadid_function = ctypes.CFUNCTYPE(ctypes.c_ulong)
+
+@openssl_locking_function
+def openssl_lock(mode, type, file, line):
+    if (mode & CRYPTO_LOCK) != 0:
+        openssl_locks[type].acquire()
+    else:
+        openssl_locks[type].release()
+
+@openssl_threadid_function
+def openssl_threadid():
+    v = threading.current_thread().ident
+    return v
+
+ssl_library.CRYPTO_set_id_callback(openssl_threadid)
+ssl_library.CRYPTO_set_locking_callback(openssl_lock)
 

@@ -37,41 +37,64 @@ def getinfo():
         'coin': spv.coin.__name__,
     }
 
-@exception_printer
-def sendtoaddress(address, amount, memo=''):
-    transaction_builder = spv.new_transaction_builder(memo=memo)
-    transaction_builder.process_change(pyspv.PubKeyChange)
-
+def get_output_producer(spv, address, amount):
     # Determine the payment type based on the version byte of the address provided
     # (I don't think this is the proper long term solution to different payment types...)
     try:
         address_bytes = int.to_bytes(pyspv.base58.decode(address), spv.coin.ADDRESS_BYTE_LENGTH, 'big')
     except OverflowError:
         address_bytes = b''
+
     k = len(spv.coin.ADDRESS_VERSION_BYTES)
     if address_bytes[:k] == spv.coin.ADDRESS_VERSION_BYTES:
-        transaction_builder.process(pyspv.PubKeyPayment(address, spv.coin.parse_money(amount)))
+        return pyspv.PubKeyPayment(address, amount)
     else:
         try:
             address_bytes = int.to_bytes(pyspv.base58.decode(address), spv.coin.P2SH_ADDRESS_BYTE_LENGTH, 'big')
         except OverflowError:
             address_bytes = b''
+
         k = len(spv.coin.P2SH_ADDRESS_VERSION_BYTES)
         if address_bytes[:k] == spv.coin.P2SH_ADDRESS_VERSION_BYTES:
-            transaction_builder.process(pyspv.MultisigScriptHashPayment(address, spv.coin.parse_money(amount)))
+            return pyspv.MultisigScriptHashPayment(address, amount)
         else:
             try:
                 # Drop last 4 bytes because of the checksum
                 address_bytes = int.to_bytes(pyspv.base58.decode(address), spv.coin.STEALTH_ADDRESS_BYTE_LENGTH, 'big')[:-4]
             except OverflowError:
                 address_bytes = b''
+
             k = len(spv.coin.STEALTH_ADDRESS_VERSION_BYTES)
             j = len(spv.coin.STEALTH_ADDRESS_SUFFIX_BYTES)
             if address_bytes[:k] == spv.coin.STEALTH_ADDRESS_VERSION_BYTES and address_bytes[-j:] == spv.coin.STEALTH_ADDRESS_SUFFIX_BYTES: 
-                transaction_builder.process(pyspv.StealthAddressPayment(address, spv.coin.parse_money(amount)))
+                return pyspv.StealthAddressPayment(address, amount)
             else:
                 return "error: bad address {}".format(address)
 
+@exception_printer
+def sendtoaddress(address, amount, memo=''):
+    transaction_builder = spv.new_transaction_builder(memo=memo)
+    transaction_builder.process_change(pyspv.PubKeyChange)
+    transaction_builder.process(get_output_producer(spv, address, spv.coin.parse_money(amount)))
+    tx = transaction_builder.finish(shuffle_inputs=True, shuffle_outputs=True)
+
+    if not tx.verify_scripts():
+        raise Exception("internal error building transaction")
+
+    spv.broadcast_transaction(tx)
+
+    return {
+        'tx': pyspv.bytes_to_hexstring(tx.serialize(), reverse=False),
+        'hash': pyspv.bytes_to_hexstring(tx.hash()),
+    }
+
+@exception_printer
+def sendspendtoaddress(spend_hash, address, amount, memo=''):
+    spend_hash = pyspv.hexstring_to_bytes(spend_hash)
+    transaction_builder = spv.new_transaction_builder(memo=memo)
+    transaction_builder.include_spend(spend_hash)
+    transaction_builder.process_change(pyspv.PubKeyChange)
+    transaction_builder.process(get_output_producer(spv, address, spv.coin.parse_money(amount)))
     tx = transaction_builder.finish(shuffle_inputs=True, shuffle_outputs=True)
 
     if not tx.verify_scripts():
@@ -118,21 +141,50 @@ def getnewpubkey(label='', compressed=False):
 
 @exception_printer
 def listspends(include_spent=False):
+    result = {
+        'spendable': [],
+        'not_spendable': [],
+    }
+
     if str(include_spent).lower() in ('1', 'true'):
         include_spent = True
+        result['spent'] = []
     else:
         include_spent = False
 
-    spendable = []
-    not_spendable = []
+    def f(spend):
+        r = {
+            'id': pyspv.bytes_to_hexstring(spend.hash()),
+            'class': spend.__class__.__name__,
+            'amount': spv.coin.format_money(spend.amount),
+            'confirmations': spend.get_confirmations(spv),
+        }
+
+        if hasattr(spend, 'prevout'):
+            r['prevout'] = {
+                'txid': pyspv.bytes_to_hexstring(spend.prevout.tx_hash),
+                'n'   : spend.prevout.n
+            }
+
+        if hasattr(spend, 'address'):
+            r['address'] = spend.address
+
+        return r
+
     for spend in spv.wallet.spends.values():
-        if not include_spent and spend['spend'].is_spent(spv):
+        is_spent = spend['spend'].is_spent(spv)
+        if not include_spent and is_spent:
             continue
-        if spend['spend'].is_spendable(spv):
-            spendable.append(str(spend['spend']))
+
+        if is_spent:
+            result['spent'].append(f(spend['spend']))
+        elif spend['spend'].is_spendable(spv):
+            result['spendable'].append(f(spend['spend']))
         else:
-            not_spendable.append(str(spend['spend']) + ', confirmations={}'.format(spend['spend'].get_confirmations(spv)))
-    return 'Spendable:\n' + '\n'.join(spendable) + '\nNot Spendable ({} confirmations required):\n'.format(spv.coin.TRANSACTION_CONFIRMATION_DEPTH) + '\n'.join(not_spendable)
+            result['not_spendable'].append(f(spend['spend']))#str(spend['spend']) + ', confirmations={}'.format(spend['spend'].get_confirmations(spv)))
+
+    return result
+    #return 'Spendable:\n' + '\n'.join(spendable) + '\nNot Spendable ({} confirmations required):\n'.format(spv.coin.TRANSACTION_CONFIRMATION_DEPTH) + '\n'.join(not_spendable)
 
 @exception_printer
 def dumppubkey(address):
@@ -208,6 +260,13 @@ def genmultisig(nreq, mtotal, *pubkeys):
         'nreq': nreq,
     }
 
+@exception_printer
+def sendrawtransaction(tx_bytes):
+    tx_bytes = pyspv.hexstring_to_bytes(tx_bytes, reverse=False)
+    tx, _ = pyspv.transaction.Transaction.unserialize(tx_bytes, spv.coin)
+    spv.broadcast_transaction(tx)
+    return pyspv.bytes_to_hexstring(tx.hash())
+
 def server_main():
     global spv
 
@@ -226,11 +285,13 @@ def server_main():
     rpc_server.register_function(getnewpubkey)
     rpc_server.register_function(getbalance)
     rpc_server.register_function(sendtoaddress)
+    rpc_server.register_function(sendspendtoaddress)
     rpc_server.register_function(getinfo)
     rpc_server.register_function(listspends)
     rpc_server.register_function(dumppubkey)
     rpc_server.register_function(dumpprivkey)
     rpc_server.register_function(genmultisig)
+    rpc_server.register_function(sendrawtransaction)
 
     try:
         rpc_server.serve_forever()
