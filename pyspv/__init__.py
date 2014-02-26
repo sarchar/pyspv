@@ -55,7 +55,6 @@ class pyspv:
         self.app_name = app_name
         self.time_offset = 0
         self.logging_level = logging_level
-        self.testnet = testnet
         self.time_samples = []
         self.sync_block_start = sync_block_start
 
@@ -71,6 +70,7 @@ class pyspv:
         if self.args.sync_block_start is not None:
             self.sync_block_start = self.args.sync_block_start
             
+        self.testnet = testnet
         self.coin = coin.Testnet if testnet else coin
 
         self.config = Config(app_name, self.coin, testnet=testnet)
