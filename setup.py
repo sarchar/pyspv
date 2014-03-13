@@ -19,7 +19,7 @@ setup(
         "Topic :: System :: Distributed Computing",
     ],
     description = "Bitcoin SPV implementation in Python",
-    packages = ["pyspv", "pyspv.monitors"],
+    packages = ["pyspv", "pyspv.monitors", "pyspv.payments"],
     requires = ['bitarray (>=0.8.1)'],
     version = '0.0.1',
     long_description = open('README.md').read(),
