@@ -1,6 +1,7 @@
 import hashlib
 import string
 
+from .script import *
 from .util import *
 
 class InvalidMoney(Exception):
@@ -65,6 +66,12 @@ class Bitcoin:
     CHECKPOINT_BLOCK_HEIGHT    = 274176
     CHECKPOINT_BLOCK_TIMESTAMP = 1386684686
     CHECKPOINT_BLOCK_BITS      = 0x1904BA6E
+
+    # Script constants
+    MAX_SCRIPT_ELEMENT_SIZE = 520
+    MAX_INSTRUCTIONS        = 201 # Non-trivial operations
+    DISABLED_OPCODES        = [ OP_CAT, OP_SUBSTR, OP_LEFT, OP_RIGHT, OP_INVERT, OP_AND, OP_OR, OP_XOR, OP_2MUL, OP_2DIV, OP_MUL, OP_DIV, OP_MOD, OP_LSHIFT, OP_RSHIFT ]
+
 
     @staticmethod
     def hash(data):
