@@ -76,7 +76,7 @@ class StealthAddressPaymentMonitor(BaseMonitor):
                 print('[STEALTHADDRESSPAYMENTMONITOR] watching for stealth payments to {}'.format(private_key.get_public_key(True).as_address(self.spv.coin)))
 
     def on_tx(self, tx):
-        return # TODO right now OpenSSL breaks on 64-bit MT
+        #return # TODO right now OpenSSL breaks on 64-bit MT
         tx_hash = tx.hash()
 
         # check inputs, they might spend coins from the wallet

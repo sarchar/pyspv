@@ -12,10 +12,6 @@ except:
 ssl_library.EC_KEY_new.restype = ctypes.c_void_p
 ssl_library.EC_KEY_new_by_curve_name.restype = ctypes.c_void_p
 
-ssl_library.OPENSSL_no_config()
-ssl_library.SSL_library_init()
-ssl_library.SSL_load_error_strings()
-
 CRYPTO_LOCK = 1
 
 NID_secp256k1 = 714

@@ -8,6 +8,7 @@ def main():
 
     tx, _ = pyspv.transaction.Transaction.unserialize(pyspv.hexstring_to_bytes(sys.argv[1], reverse=False), spv.coin)
     input_count = len(tx.inputs)
+    total_added = 0
 
     for spend_hash in sys.argv[2:]:
         spend_hash = pyspv.hexstring_to_bytes(spend_hash)
@@ -16,11 +17,14 @@ def main():
         for input_creator in spend.create_input_creators(spv, pyspv.transaction.Transaction.SIGHASH_ALL | pyspv.transaction.Transaction.SIGHASH_ANYONECANPAY):
             tx.inputs.append(pyspv.transaction.UnsignedTransactionInput(input_creator))
 
+        total_added += spend.amount
+
     for i, unsigned_input in enumerate(tx.inputs):
         if isinstance(unsigned_input, pyspv.transaction.UnsignedTransactionInput):
             tx.inputs[i] = unsigned_input.sign(tx, i)
 
     print(pyspv.bytes_to_hexstring(tx.serialize(), reverse=False))
+    print("total added as inputs: {}".format(spv.coin.format_money(total_added)))
 
     spv.shutdown() # Async shutdown
     spv.join()     # Wait for shutdown to complete
