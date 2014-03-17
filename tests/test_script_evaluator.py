@@ -191,3 +191,60 @@ class TestOther(unittest.TestCase):
         evaluator = ScriptEvaluator(Bitcoin, script)
         self.assertRaises(ScriptVerifyFailure, evaluator.evaluate)
 
+class TestEqual(unittest.TestCase):
+    def test1(self):
+        script = Script()
+        script.push_op(OP_2)
+        script.push_bytes(b'\x02')
+        script.push_op(OP_EQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x01'])
+
+    def test2(self):
+        script = Script()
+        script.push_op(OP_3)
+        script.push_bytes(b'\x02')
+        script.push_op(OP_EQUALVERIFY)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(ScriptVerifyFailure, evaluator.evaluate)
+
+    def test3(self):
+        script = Script()
+        script.push_op(OP_3)
+        script.push_bytes(b'\x02')
+        script.push_op(OP_EQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x00'])
+
+class TestAltStack(unittest.TestCase):
+    def test1(self):
+        script = Script()
+        script.push_op(OP_FROMALTSTACK)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test2(self):
+        script = Script()
+        script.push_op(OP_TOALTSTACK)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test3(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_TOALTSTACK)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [])
+
+    def test4(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_TOALTSTACK)
+        script.push_op(OP_FROMALTSTACK)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x05'])
+

@@ -256,9 +256,9 @@ class ScriptEvaluator:
         block_false = 0
         block_exec_values = []
         stack = []
+        altstack = []
 
         def cast_to_bool(b):
-            print("casting", b)
             for i, v in enumerate(b):
                 if v != 0 and i != (len(b)-1):
                     return True
@@ -319,6 +319,16 @@ class ScriptEvaluator:
                     if not v:
                         block_false -= 1
 
+                elif opcode == OP_EQUAL or opcode == OP_EQUALVERIFY:
+                    u = stack.pop()
+                    v = stack.pop()
+                    stack.append(int(u == v).to_bytes(1, 'big'))
+                    if opcode == OP_EQUALVERIFY:
+                        if cast_to_bool(stack[-1]):
+                            stack.pop()
+                        else:
+                            raise ScriptVerifyFailure()
+
                 elif opcode == OP_VERIFY:
                     v = cast_to_bool(stack.pop())
                     if not v:
@@ -326,6 +336,12 @@ class ScriptEvaluator:
 
                 elif opcode == OP_RETURN:
                     raise ScriptReturn("Script terminated via OP_RETURN")
+
+                elif opcode == OP_TOALTSTACK:
+                    altstack.append(stack.pop())
+
+                elif opcode == OP_FROMALTSTACK:
+                    stack.append(altstack.pop())
 
         if len(block_exec_values):
             raise UnterminatedIfStatement("Program didn't close {} IF statements".format(len(block_exec_values)))
