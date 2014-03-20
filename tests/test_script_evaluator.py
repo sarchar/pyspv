@@ -415,24 +415,24 @@ class TestStackOps(unittest.TestCase):
         self.assertEqual(stack, [b'\x01', b'\x01'])
 
     def test20(self):
-        for i in range(1, 256):
+        for i in range(1, 128):
             script = Script()
             for _ in range(i):
                 script.push_op(OP_1)
             script.push_op(OP_DEPTH)
             evaluator = ScriptEvaluator(Bitcoin, script)
             stack = evaluator.evaluate()
-            self.assertEqual(stack, [b'\x01'] * i + [i.to_bytes(1, 'big')])
+            self.assertEqual(stack, [b'\x01'] * i + [i.to_bytes(1, 'big', signed=True)])
     
     def test21(self):
-        for i in range(256, 512):
+        for i in range(128, 512):
             script = Script()
             for _ in range(i):
                 script.push_op(OP_1)
             script.push_op(OP_DEPTH)
             evaluator = ScriptEvaluator(Bitcoin, script)
             stack = evaluator.evaluate()
-            self.assertEqual(stack, [b'\x01'] * i + [i.to_bytes(2, 'big')])
+            self.assertEqual(stack, [b'\x01'] * i + [i.to_bytes(2, 'big', signed=True)])
 
     def test22(self):
         script = Script()
@@ -684,7 +684,7 @@ class TestStackOps(unittest.TestCase):
         self.assertRaises(IndexError, evaluator.evaluate)
 
     def test51(self):
-        for j in range(256):
+        for j in range(128):
             script = Script()
             script.push_bytes(bytes([1] * j))
             script.push_op(OP_SIZE)
@@ -699,4 +699,562 @@ class TestStackOps(unittest.TestCase):
         script.push_op(OP_SIZE)
         evaluator = ScriptEvaluator(Bitcoin, script)
         self.assertRaises(IndexError, evaluator.evaluate)
+
+class TestUnaryOps(unittest.TestCase):
+    def test1(self):
+        script = Script()
+        script.push_op(OP_0)
+        script.push_op(OP_1ADD)
+        script.push_op(OP_7)
+        script.push_op(OP_1ADD)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x01', b'\x08'])
+
+    def test2(self):
+        script = Script()
+        script.push_op(OP_1ADD)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test3(self):
+        script = Script()
+        script.push_op(OP_0)
+        script.push_op(OP_1SUB)
+        script.push_op(OP_7)
+        script.push_op(OP_1SUB)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\xff', b'\x06'])
+
+    def test4(self):
+        script = Script()
+        script.push_op(OP_1SUB)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test5(self):
+        script = Script()
+        script.push_op(OP_1)
+        script.push_op(OP_NEGATE)
+        script.push_op(OP_0)
+        script.push_op(OP_1SUB)
+        script.push_op(OP_NEGATE)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\xff', b'\x01'])
+
+    def test6(self):
+        script = Script()
+        script.push_op(OP_NEGATE)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test7(self):
+        script = Script()
+        script.push_op(OP_1)
+        script.push_op(OP_NEGATE)
+        script.push_op(OP_ABS)
+        script.push_op(OP_0)
+        script.push_op(OP_1ADD)
+        script.push_op(OP_ABS)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x01', b'\x01'])
+
+    def test8(self):
+        script = Script()
+        script.push_op(OP_ABS)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test9(self):
+        script = Script()
+        script.push_op(OP_1)
+        script.push_op(OP_NOT)
+        script.push_op(OP_0)
+        script.push_op(OP_NOT)
+        script.push_op(OP_7)
+        script.push_op(OP_NOT)
+        script.push_op(OP_NOT)
+        script.push_op(OP_0)
+        script.push_op(OP_NOT)
+        script.push_op(OP_NOT)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'', b'\x01', b'\x01', b''])
+
+    def test10(self):
+        script = Script()
+        script.push_op(OP_NOT)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test11(self):
+        script = Script()
+        script.push_op(OP_1)
+        script.push_op(OP_0NOTEQUAL)
+        script.push_op(OP_0)
+        script.push_op(OP_0NOTEQUAL)
+        script.push_op(OP_7)
+        script.push_op(OP_0NOTEQUAL)
+        script.push_op(OP_0NOTEQUAL)
+        script.push_op(OP_0)
+        script.push_op(OP_0NOTEQUAL)
+        script.push_op(OP_0NOTEQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x01', b'', b'\x01', b''])
+
+    def test12(self):
+        script = Script()
+        script.push_op(OP_0NOTEQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test13(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_ADD)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x0c'])
+
+    def test14(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_ADD)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test15(self):
+        script = Script()
+        script.push_op(OP_ADD)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test16(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_SUB)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\xfe'])
+
+    def test17(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_SUB)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test18(self):
+        script = Script()
+        script.push_op(OP_SUB)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test19(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_BOOLAND)
+        script.push_op(OP_0)
+        script.push_op(OP_7)
+        script.push_op(OP_BOOLAND)
+        script.push_op(OP_7)
+        script.push_op(OP_0)
+        script.push_op(OP_BOOLAND)
+        script.push_op(OP_0)
+        script.push_op(OP_0)
+        script.push_op(OP_BOOLAND)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x01', b'', b'', b''])
+
+    def test20(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_BOOLAND)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test21(self):
+        script = Script()
+        script.push_op(OP_BOOLAND)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test22(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_BOOLOR)
+        script.push_op(OP_0)
+        script.push_op(OP_7)
+        script.push_op(OP_BOOLOR)
+        script.push_op(OP_7)
+        script.push_op(OP_0)
+        script.push_op(OP_BOOLOR)
+        script.push_op(OP_0)
+        script.push_op(OP_0)
+        script.push_op(OP_BOOLOR)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x01', b'\x01', b'\x01', b''])
+
+    def test23(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_BOOLOR)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test24(self):
+        script = Script()
+        script.push_op(OP_BOOLOR)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+
+    def test25(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_NUMEQUAL)
+        script.push_op(OP_0)
+        script.push_op(OP_7)
+        script.push_op(OP_NUMEQUAL)
+        script.push_op(OP_7)
+        script.push_op(OP_0)
+        script.push_op(OP_NUMEQUAL)
+        script.push_op(OP_0)
+        script.push_op(OP_0)
+        script.push_op(OP_NUMEQUAL)
+        script.push_op(OP_9)
+        script.push_op(OP_9)
+        script.push_op(OP_NUMEQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'', b'', b'', b'\x01', b'\x01'])
+
+    def test26(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_NUMEQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test27(self):
+        script = Script()
+        script.push_op(OP_NUMEQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test28(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_NUMEQUALVERIFY)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(ScriptVerifyFailure, evaluator.evaluate)
+        script = Script()
+        script.push_op(OP_0)
+        script.push_op(OP_7)
+        script.push_op(OP_NUMEQUALVERIFY)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(ScriptVerifyFailure, evaluator.evaluate)
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_0)
+        script.push_op(OP_NUMEQUALVERIFY)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(ScriptVerifyFailure, evaluator.evaluate)
+        script = Script()
+        script.push_op(OP_0)
+        script.push_op(OP_0)
+        script.push_op(OP_NUMEQUALVERIFY)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [])
+        script = Script()
+        script.push_op(OP_9)
+        script.push_op(OP_9)
+        script.push_op(OP_NUMEQUALVERIFY)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [])
+
+    def test29(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_NUMEQUALVERIFY)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test30(self):
+        script = Script()
+        script.push_op(OP_NUMEQUALVERIFY)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test31(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_NUMNOTEQUAL)
+        script.push_op(OP_0)
+        script.push_op(OP_7)
+        script.push_op(OP_NUMNOTEQUAL)
+        script.push_op(OP_7)
+        script.push_op(OP_0)
+        script.push_op(OP_NUMNOTEQUAL)
+        script.push_op(OP_0)
+        script.push_op(OP_0)
+        script.push_op(OP_NUMNOTEQUAL)
+        script.push_op(OP_9)
+        script.push_op(OP_9)
+        script.push_op(OP_NUMNOTEQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x01', b'\x01', b'\x01', b'', b''])
+
+    def test32(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_NUMNOTEQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test33(self):
+        script = Script()
+        script.push_op(OP_NUMNOTEQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test34(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_LESSTHAN)
+        script.push_op(OP_7)
+        script.push_op(OP_0)
+        script.push_op(OP_LESSTHAN)
+        script.push_op(OP_9)
+        script.push_op(OP_9)
+        script.push_op(OP_LESSTHAN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x01', b'', b''])
+
+    def test35(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_LESSTHAN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test36(self):
+        script = Script()
+        script.push_op(OP_LESSTHAN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test37(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_LESSTHANOREQUAL)
+        script.push_op(OP_7)
+        script.push_op(OP_0)
+        script.push_op(OP_LESSTHANOREQUAL)
+        script.push_op(OP_9)
+        script.push_op(OP_9)
+        script.push_op(OP_LESSTHANOREQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x01', b'', b'\x01'])
+
+    def test38(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_LESSTHANOREQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test39(self):
+        script = Script()
+        script.push_op(OP_LESSTHANOREQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test40(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_GREATERTHAN)
+        script.push_op(OP_7)
+        script.push_op(OP_0)
+        script.push_op(OP_GREATERTHAN)
+        script.push_op(OP_9)
+        script.push_op(OP_9)
+        script.push_op(OP_GREATERTHAN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'', b'\x01', b''])
+
+    def test41(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_GREATERTHAN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test42(self):
+        script = Script()
+        script.push_op(OP_GREATERTHAN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test43(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_GREATERTHANOREQUAL)
+        script.push_op(OP_7)
+        script.push_op(OP_0)
+        script.push_op(OP_GREATERTHANOREQUAL)
+        script.push_op(OP_9)
+        script.push_op(OP_9)
+        script.push_op(OP_GREATERTHANOREQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'', b'\x01', b'\x01'])
+
+    def test44(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_GREATERTHANOREQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test45(self):
+        script = Script()
+        script.push_op(OP_GREATERTHANOREQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test46(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_MIN)
+        script.push_op(OP_7)
+        script.push_op(OP_0)
+        script.push_op(OP_MIN)
+        script.push_op(OP_9)
+        script.push_op(OP_9)
+        script.push_op(OP_MIN)
+        script.push_op(OP_0)
+        script.push_op(OP_1SUB)
+        script.push_op(OP_5)
+        script.push_op(OP_MIN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x05', b'', b'\x09', b'\xff'])
+
+    def test47(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_MIN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test48(self):
+        script = Script()
+        script.push_op(OP_MIN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test49(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_MAX)
+        script.push_op(OP_7)
+        script.push_op(OP_0)
+        script.push_op(OP_MAX)
+        script.push_op(OP_9)
+        script.push_op(OP_9)
+        script.push_op(OP_MAX)
+        script.push_op(OP_1NEGATE)
+        script.push_op(OP_2)
+        script.push_op(OP_NEGATE)
+        script.push_op(OP_MAX)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x07', b'\x07', b'\x09', b'\xff'])
+
+    def test50(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_MAX)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test51(self):
+        script = Script()
+        script.push_op(OP_MAX)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test52(self):
+        script = Script()
+        script.push_op(OP_5)
+        script.push_op(OP_7)
+        script.push_op(OP_9)
+        script.push_op(OP_WITHIN)
+        script.push_op(OP_5)
+        script.push_op(OP_5)
+        script.push_op(OP_9)
+        script.push_op(OP_WITHIN)
+        script.push_op(OP_7)
+        script.push_op(OP_5)
+        script.push_op(OP_9)
+        script.push_op(OP_WITHIN)
+        script.push_op(OP_9)
+        script.push_op(OP_5)
+        script.push_op(OP_9)
+        script.push_op(OP_WITHIN)
+        script.push_op(OP_0)
+        script.push_op(OP_1NEGATE)
+        script.push_op(OP_1)
+        script.push_op(OP_WITHIN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'', b'\x01', b'\x01', b'', b'\x01'])
+
+    def test53(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_7)
+        script.push_op(OP_WITHIN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test54(self):
+        script = Script()
+        script.push_op(OP_7)
+        script.push_op(OP_WITHIN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
+    def test55(self):
+        script = Script()
+        script.push_op(OP_WITHIN)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        self.assertRaises(IndexError, evaluator.evaluate)
+
 

@@ -201,7 +201,7 @@ class Script:
 
 class ScriptEvaluator:
     CONSTANTS = {
-        OP_1NEGATE: b'\xff\xff\xff\xff',
+        OP_1NEGATE: b'\xff',
         OP_1      : b'\x01',
         OP_2      : b'\x02',
         OP_3      : b'\x03',
@@ -266,8 +266,14 @@ class ScriptEvaluator:
                     return True
             return False
                     
-        def encode_int(v, byte_order='big'):
-            return v.to_bytes((v.bit_length()+7)//8, byte_order)
+        def encode_int(v, byte_order='big', signed=True):
+            try:
+                return v.to_bytes((v.bit_length()+7)//8, byte_order, signed=signed)
+            except OverflowError:
+                r = v.to_bytes((v.bit_length()+15)//8, byte_order, signed=signed)
+                if len(r) > 1 and r[0] == 0 and (r[1] & 0x80) == 0:
+                    r = r[1:]
+                return r
 
         while pc < len(self.script.program):
             opcode, data, pc = self._get_op(pc)
@@ -428,6 +434,50 @@ class ScriptEvaluator:
                 elif opcode == OP_SIZE:
                     # (x -- x len(x))
                     stack.append(encode_int(len(stack[-1])))
+
+                elif opcode in (OP_1ADD, OP_1SUB, OP_NEGATE, OP_ABS, OP_NOT, OP_0NOTEQUAL):
+                    # (in -- out)
+                    v = int.from_bytes(stack.pop(), 'big', signed=True)
+                    if   opcode == OP_1ADD:      v += 1
+                    elif opcode == OP_1SUB:      v -= 1
+                    elif opcode == OP_NEGATE:    v = -v
+                    elif opcode == OP_ABS:       v = -v if v < 0 else v
+                    elif opcode == OP_NOT:       v = (v == 0)
+                    elif opcode == OP_0NOTEQUAL: v = (v != 0)
+                    stack.append(encode_int(v))
+
+                elif opcode in (OP_ADD, OP_SUB, OP_BOOLAND, OP_BOOLOR, OP_NUMEQUAL, OP_NUMEQUALVERIFY, OP_NUMNOTEQUAL, OP_LESSTHAN, OP_LESSTHANOREQUAL, OP_GREATERTHAN, OP_GREATERTHANOREQUAL, OP_MIN, OP_MAX):
+                    # (x1 x2 -- out)
+                    x2 = int.from_bytes(stack.pop(), 'big', signed=True)
+                    x1 = int.from_bytes(stack.pop(), 'big', signed=True)
+                    v = None
+                    if   opcode == OP_ADD:                v = x1 + x2
+                    elif opcode == OP_SUB:                v = x1 - x2
+                    elif opcode == OP_BOOLAND:            v = (x1 != 0 and x2 != 0)
+                    elif opcode == OP_BOOLOR:             v = (x1 != 0 or x2 != 0)
+                    elif opcode == OP_NUMEQUAL:           v = (x1 == x2)
+                    elif opcode == OP_NUMEQUALVERIFY:     v = (x1 == x2)
+                    elif opcode == OP_NUMNOTEQUAL:        v = (x1 != x2)
+                    elif opcode == OP_LESSTHAN:           v = (x1 < x2)
+                    elif opcode == OP_LESSTHANOREQUAL:    v = (x1 <= x2)
+                    elif opcode == OP_GREATERTHAN:        v = (x1 > x2)
+                    elif opcode == OP_GREATERTHANOREQUAL: v = (x1 >= x2)
+                    elif opcode == OP_MIN:                v = min(x1, x2)
+                    elif opcode == OP_MAX:                v = max(x1, x2)
+                    stack.append(encode_int(v))
+
+                    if opcode == OP_NUMEQUALVERIFY:
+                        if cast_to_bool(stack[-1]):
+                            stack.pop()
+                        else:
+                            raise ScriptVerifyFailure()
+
+                elif opcode == OP_WITHIN:
+                    # (x min max -- out)
+                    b = int.from_bytes(stack.pop(), 'big', signed=True)
+                    a = int.from_bytes(stack.pop(), 'big', signed=True)
+                    x = int.from_bytes(stack.pop(), 'big', signed=True)
+                    stack.append(encode_int(int(a <= x < b)))
 
         if len(block_exec_values):
             raise UnterminatedIfStatement("Program didn't close {} IF statements".format(len(block_exec_values)))
