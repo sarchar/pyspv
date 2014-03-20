@@ -266,11 +266,14 @@ class ScriptEvaluator:
                     return True
             return False
                     
+        def encode_int(v, byte_order='big'):
+            return v.to_bytes((v.bit_length()+7)//8, byte_order)
+
         while pc < len(self.script.program):
             opcode, data, pc = self._get_op(pc)
             block_exec = (block_false == 0)
 
-            print("Eval: {} (block_exec={})".format("OP_PUSHDATA1" if opcode < OP_PUSHDATA1 else OPCODE_MAP[opcode], block_exec))
+            #print("Eval: {} (block_exec={})".format("OP_PUSHDATA1" if opcode < OP_PUSHDATA1 else OPCODE_MAP[opcode], block_exec))
 
             # Opcodes over OP_16 are non-datapush "do something" opcodes
             if opcode > OP_16:
@@ -285,7 +288,7 @@ class ScriptEvaluator:
                 assert 0 <= opcode <= OP_PUSHDATA4
                 if len(data) > self.coin.MAX_SCRIPT_ELEMENT_SIZE:
                     raise InvalidScriptElementSize("Script element was {} bytes".format(len(data)))
-                print("PushData: {}".format(bytes_to_hexstring(data, reverse=False)))
+                #print("PushData: {}".format(bytes_to_hexstring(data, reverse=False)))
                 stack.append(data)
 
             elif block_exec or (OP_IF <= opcode <= OP_ENDIF):
@@ -342,6 +345,89 @@ class ScriptEvaluator:
 
                 elif opcode == OP_FROMALTSTACK:
                     stack.append(altstack.pop())
+
+                elif opcode == OP_2DROP:
+                    # (x1 x2 --)
+                    stack.pop()
+                    stack.pop()
+
+                elif opcode == OP_2DUP:
+                    # (x1 x2 -- x1 x2 x1 x2)
+                    stack.append(stack[-2])
+                    stack.append(stack[-2])
+
+
+                elif opcode == OP_3DUP:
+                    # (x1 x2 x3 -- x1 x2 x3 x1 x2 x3)
+                    stack.append(stack[-3])
+                    stack.append(stack[-3])
+                    stack.append(stack[-3])
+
+                elif opcode == OP_2OVER:
+                    # (x1 x2 x3 x4 -- x1 x2 x3 x4 x1 x2)
+                    stack.append(stack[-4])
+                    stack.append(stack[-4])
+
+                elif opcode == OP_2ROT:
+                    # (x1 x2 x3 x4 x5 x6 -- x3 x4 x5 x6 x1 x2)
+                    x1, x2, stack = stack[-6], stack[-5], stack[:-6] + stack[-4:]
+                    stack.append(x1)
+                    stack.append(x2)
+
+                elif opcode == OP_2SWAP:
+                    # (x1 x2 x3 x4 -- x3 x4 x1 x2)
+                    stack[-4], stack[-3], stack[-2], stack[-1] = stack[-2], stack[-1], stack[-4], stack[-3]
+
+                elif opcode == OP_IFDUP:
+                    # (x -- x or x -- x x)
+                    v = stack[-1]
+                    if cast_to_bool(v):
+                        stack.append(v)
+                
+                elif opcode == OP_DEPTH:
+                    # (x .. -- x .. xD) where D is len(stack)
+                    stack.append(encode_int(len(stack)))
+
+                elif opcode == OP_DROP:
+                    # (x --)
+                    stack.pop()
+
+                elif opcode == OP_DUP:
+                    # (x -- x x)
+                    stack.append(stack[-1])
+
+                elif opcode == OP_NIP:
+                    # (x1 x2 -- x2)
+                    stack[-2] = stack[-1]
+                    stack.pop()
+
+                elif opcode == OP_OVER:
+                    # (x1 x2 -- x1 x2 x1)
+                    stack.append(stack[-2])
+
+                elif opcode in (OP_PICK, OP_ROLL):
+                    # OP_PICK: (xn ... x2 x1 x0 n -- xn ... x2 x1 x0 xn)
+                    # OP_ROLL: (xn ... x2 x1 x0 n -- ... x2 x1 x0 xn)
+                    v = int.from_bytes(stack.pop(), 'big')
+                    stack = stack[:-v-1] + ([stack[-v-1]] if opcode == OP_PICK else []) + (stack[-v:] if v > 0 else []) + [stack[-v-1]]
+
+                elif opcode == OP_ROT:
+                    # (x1 x2 x3 -- x2 x3 x1)
+                    stack[-3], stack[-2], stack[-1] = stack[-2], stack[-1], stack[-3]
+
+                elif opcode == OP_SWAP:
+                    # (x1 x2 -- x2 x1)
+                    stack[-2], stack[-1] = stack[-1], stack[-2]
+
+                elif opcode == OP_TUCK:
+                    # (x1 x2 -- x2 x1 x2)
+                    a = stack.pop()
+                    b = stack.pop()
+                    stack += [a, b, a]
+                
+                elif opcode == OP_SIZE:
+                    # (x -- x len(x))
+                    stack.append(encode_int(len(stack[-1])))
 
         if len(block_exec_values):
             raise UnterminatedIfStatement("Program didn't close {} IF statements".format(len(block_exec_values)))
