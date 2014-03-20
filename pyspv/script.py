@@ -1,3 +1,4 @@
+import hashlib
 
 from .util import *
 
@@ -478,6 +479,40 @@ class ScriptEvaluator:
                     a = int.from_bytes(stack.pop(), 'big', signed=True)
                     x = int.from_bytes(stack.pop(), 'big', signed=True)
                     stack.append(encode_int(int(a <= x < b)))
+
+                elif opcode == OP_RIPEMD160:
+                    data = stack.pop()
+                    hasher = hashlib.new('ripemd160')
+                    hasher.update(data)
+                    stack.append(hasher.digest())
+
+                elif opcode == OP_SHA1:
+                    data = stack.pop()
+                    hasher = hashlib.sha1()
+                    hasher.update(data)
+                    stack.append(hasher.digest())
+
+                elif opcode == OP_SHA256:
+                    data = stack.pop()
+                    hasher = hashlib.sha256()
+                    hasher.update(data)
+                    stack.append(hasher.digest())
+
+                elif opcode == OP_HASH160:
+                    data = stack.pop()
+                    hasher = hashlib.sha256()
+                    hasher.update(data)
+                    hasher2 = hashlib.new('ripemd160')
+                    hasher2.update(hasher.digest())
+                    stack.append(hasher2.digest())
+
+                elif opcode == OP_HASH256:
+                    data = stack.pop()
+                    hasher = hashlib.sha256()
+                    hasher.update(data)
+                    hasher2 = hashlib.sha256()
+                    hasher2.update(hasher.digest())
+                    stack.append(hasher2.digest())
 
         if len(block_exec_values):
             raise UnterminatedIfStatement("Program didn't close {} IF statements".format(len(block_exec_values)))

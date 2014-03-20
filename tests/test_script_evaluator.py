@@ -1257,4 +1257,187 @@ class TestUnaryOps(unittest.TestCase):
         evaluator = ScriptEvaluator(Bitcoin, script)
         self.assertRaises(IndexError, evaluator.evaluate)
 
+class TestCrypto(unittest.TestCase):
+    # The following test cases are taken from Bitcoin Core test cases and modified to fit in here
+
+    def test1(self):
+        # ["''", "RIPEMD160 0x14 0x9c1185a5c5e9fc54612808977ee8f548b2258d31 EQUAL"],
+        script = Script()
+        script.push_bytes(b'')
+        script.push_op(OP_RIPEMD160)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('9c1185a5c5e9fc54612808977ee8f548b2258d31', reverse=False)])
+
+    def test2(self):
+        # ["'a'", "RIPEMD160 0x14 0x0bdc9d2d256b3ee9daae347be6f4dc835a467ffe EQUAL"],
+        script = Script()
+        script.push_bytes(b'a')
+        script.push_op(OP_RIPEMD160)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('0bdc9d2d256b3ee9daae347be6f4dc835a467ffe', reverse=False)])
+
+    def test3(self):
+        # ["'abcdefghijklmnopqrstuvwxyz'", "RIPEMD160 0x14 0xf71c27109c692c1b56bbdceb5b9d2865b3708dbc EQUAL"],
+        script = Script()
+        script.push_bytes(b'abcdefghijklmnopqrstuvwxyz')
+        script.push_op(OP_RIPEMD160)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('f71c27109c692c1b56bbdceb5b9d2865b3708dbc', reverse=False)])
+
+    def test4(self):
+        # ["''", "SHA1 0x14 0xda39a3ee5e6b4b0d3255bfef95601890afd80709 EQUAL"],
+        script = Script()
+        script.push_bytes(b'')
+        script.push_op(OP_SHA1)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('da39a3ee5e6b4b0d3255bfef95601890afd80709', reverse=False)])
+
+    def test5(self):
+        # ["'a'", "SHA1 0x14 0x86f7e437faa5a7fce15d1ddcb9eaeaea377667b8 EQUAL"],
+        script = Script()
+        script.push_bytes(b'a')
+        script.push_op(OP_SHA1)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('86f7e437faa5a7fce15d1ddcb9eaeaea377667b8', reverse=False)])
+
+    def test6(self):
+        # ["'abcdefghijklmnopqrstuvwxyz'", "SHA1 0x14 0x32d10c7b8cf96570ca04ce37f2a19d84240d3a89 EQUAL"],
+        script = Script()
+        script.push_bytes(b'abcdefghijklmnopqrstuvwxyz')
+        script.push_op(OP_SHA1)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('32d10c7b8cf96570ca04ce37f2a19d84240d3a89', reverse=False)])
+
+    def test7(self):
+        # ["''", "SHA256 0x20 0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 EQUAL"],
+        script = Script()
+        script.push_bytes(b'')
+        script.push_op(OP_SHA256)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', reverse=False)])
+
+    def test8(self):
+        # ["'a'", "SHA256 0x20 0xca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb EQUAL"],
+        script = Script()
+        script.push_bytes(b'a')
+        script.push_op(OP_SHA256)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb', reverse=False)])
+
+    def test9(self):
+        # ["'abcdefghijklmnopqrstuvwxyz'", "SHA256 0x20 0x71c480df93d6ae2f1efad1447c66c9525e316218cf51fc8d9ed832f2daf18b73 EQUAL"],
+        script = Script()
+        script.push_bytes(b'abcdefghijklmnopqrstuvwxyz')
+        script.push_op(OP_SHA256)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('71c480df93d6ae2f1efad1447c66c9525e316218cf51fc8d9ed832f2daf18b73', reverse=False)])
+
+    def test10(self):
+        # ["''", "DUP HASH160 SWAP SHA256 RIPEMD160 EQUAL"],
+        script = Script()
+        script.push_bytes(b'')
+        script.push_op(OP_DUP)
+        script.push_op(OP_HASH160)
+        script.push_op(OP_SWAP)
+        script.push_op(OP_SHA256)
+        script.push_op(OP_RIPEMD160)
+        script.push_op(OP_EQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x01'])
+
+    def test11(self):
+        # ["''", "DUP HASH256 SWAP SHA256 SHA256 EQUAL"],
+        script = Script()
+        script.push_bytes(b'')
+        script.push_op(OP_DUP)
+        script.push_op(OP_HASH256)
+        script.push_op(OP_SWAP)
+        script.push_op(OP_SHA256)
+        script.push_op(OP_SHA256)
+        script.push_op(OP_EQUAL)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [b'\x01'])
+
+    def test12(self):
+        # ["''", "NOP HASH160 0x14 0xb472a266d0bd89c13706a4132ccfb16f7c3b9fcb EQUAL"],
+        script = Script()
+        script.push_bytes(b'')
+        script.push_op(OP_NOP)
+        script.push_op(OP_HASH160)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('b472a266d0bd89c13706a4132ccfb16f7c3b9fcb', reverse=False)])
+
+    def test13(self):
+        # ["'a'", "HASH160 NOP 0x14 0x994355199e516ff76c4fa4aab39337b9d84cf12b EQUAL"],
+        script = Script()
+        script.push_bytes(b'a')
+        script.push_op(OP_HASH160)
+        script.push_op(OP_NOP)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('994355199e516ff76c4fa4aab39337b9d84cf12b', reverse=False)])
+
+    def test14(self):
+        # ["'abcdefghijklmnopqrstuvwxyz'", "HASH160 0x4c 0x14 0xc286a1af0947f58d1ad787385b1c2c4a976f9e71 EQUAL"],
+        script = Script()
+        script.push_bytes(b'abcdefghijklmnopqrstuvwxyz')
+        script.push_op(OP_HASH160)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('c286a1af0947f58d1ad787385b1c2c4a976f9e71', reverse=False)])
+
+    def test15(self):
+        # ["''", "HASH256 0x20 0x5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456 EQUAL"],
+        script = Script()
+        script.push_bytes(b'')
+        script.push_op(OP_HASH256)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456', reverse=False)])
+
+    def test16(self):
+        # ["'a'", "HASH256 0x20 0xbf5d3affb73efd2ec6c36ad3112dd933efed63c4e1cbffcfa88e2759c144f2d8 EQUAL"],
+        script = Script()
+        script.push_bytes(b'a')
+        script.push_op(OP_HASH256)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('bf5d3affb73efd2ec6c36ad3112dd933efed63c4e1cbffcfa88e2759c144f2d8', reverse=False)])
+
+    def test17(self):
+        # ["'abcdefghijklmnopqrstuvwxyz'", "HASH256 0x4c 0x20 0xca139bc10c2f660da42666f72e89a225936fc60f193c161124a672050c434671 EQUAL"],
+        script = Script()
+        script.push_bytes(b'abcdefghijklmnopqrstuvwxyz')
+        script.push_op(OP_HASH256)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertEqual(stack, [hexstring_to_bytes('ca139bc10c2f660da42666f72e89a225936fc60f193c161124a672050c434671', reverse=False)])
+
+    def test18(self):
+        script = Script()
+        script.push_bytes(b'')
+        script.push_op(OP_HASH256)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertNotEqual(stack, [hexstring_to_bytes('ca139bc10c2f660da42666f72e89a225936fc60f193c161124a672050c434671', reverse=False)])
+
+    def test19(self):
+        script = Script()
+        script.push_bytes(b'')
+        script.push_op(OP_HASH160)
+        evaluator = ScriptEvaluator(Bitcoin, script)
+        stack = evaluator.evaluate()
+        self.assertNotEqual(stack, [hexstring_to_bytes('c286a1af0947f58d1ad787385b1c2c4a976f9e71', reverse=False)])
 
