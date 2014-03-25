@@ -793,11 +793,16 @@ class Peer(threading.Thread):
 
             # TODO - should we consider the peer misbehaving if its ignoring our request for transactions?
             inprogress_tx_invs = ((inv, when) for inv, when in self.inprogress_invs.items() if inv.type == Inv.MSG_TX)
+            timedout_invs = set()
             for inv, when in inprogress_tx_invs:
                 if (now - when) > Manager.TX_REQUEST_TIMEOUT:
                     # Tell manager (by passing None) that the tx request timed out
                     self.manager.received_transaction(inv, None)
-                    self.inprogress_invs.pop(inv)
+                    timedout_invs.add(inv)
+
+            # Fix for #3 - don't pop items out of inprogress_invs during iteration
+            for inv in timedout_invs:
+                self.inprogress_invs.pop(inv)
 
             if len(self.inprogress_invs):
                 return
@@ -805,7 +810,7 @@ class Peer(threading.Thread):
         requests = set()
         aborts = set()
 
-        # This loop prioritizes blocks
+        # This sorted() call prioritizes blocks before transactions
         for inv, when in sorted(self.invs.items(), key=lambda x: 1 if x[0].type == Inv.MSG_BLOCK else 2):
             if when > now:
                 # This mechanism allows us to "retry" fetching the item later if one request fails
