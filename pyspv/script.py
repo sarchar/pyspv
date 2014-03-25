@@ -19,24 +19,15 @@ OP_HASH160       = 0xa9
 OP_CHECKMULTISIG = 0xae
 OP_CHECKSIG      = 0xac
 
-OPCODE_MAP = {
-    OP_FALSE         : "OP_FALSE",            
-    OP_1             : "OP_1",
-    OP_2             : "OP_2",
-    OP_3             : "OP_3",
-    OP_PUSHDATA1     : "OP_PUSHDATA1",
-    OP_PUSHDATA2     : "OP_PUSHDATA2",
-    OP_PUSHDATA4     : "OP_PUSHDATA4",
-    OP_RETURN        : "OP_RETURN",
-    OP_DUP           : "OP_DUP",
-    OP_EQUAL         : "OP_EQUAL",
-    OP_EQUALVERIFY   : "OP_EQUALVERIFY",
-    OP_HASH160       : "OP_HASH160",
-    OP_CHECKSIG      : "OP_CHECKSIG",
-    OP_CHECKMULTISIG : "OP_CHECKMULTISIG",
-}
+OPCODE_MAP = {}
+OPCODE_NAMES = {}
 
-OPCODE_NAMES = dict((y,x) for x,y in OPCODE_MAP.items())
+for name in list(globals().keys()):
+    if name.startswith('OP_'):
+        v = globals()[name]
+        if isinstance(v, int) and 0 <= v <= 0xff:
+            OPCODE_MAP[v] = name
+            OPCODE_NAMES[name] = v
 
 class Script:
     def __init__(self, program=b''):

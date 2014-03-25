@@ -232,7 +232,7 @@ class Blockchain:
 
                 # The block must meet proof of work requirements
                 while not skip_validation:
-                    next_work = self.__get_next_work(self.blocks[hash_to_check], referenced_by_block_link)
+                    next_work = self.__get_next_work(self.blocks[hash_to_check], referenced_by_block_link['header'].timestamp)
                     if next_work != referenced_by_block_link['header'].bits:
                         error = "proof of work error: new block has bits = {:x} but it should be {:x}".format(referenced_by_block_link['header'].bits, next_work)
                         break
@@ -307,11 +307,18 @@ class Blockchain:
 
         return changes
 
-    def __get_next_work(self, prev_block_link, block_link):
+    def get_next_work(self, next_block_link_timestamp):
+        with self.blockchain_lock:
+            return self.__get_next_work(self.best_chain, next_block_link_timestamp)
+
+    def get_next_reward(self):
+        return self.spv.coin.STARTING_BLOCK_REWARD >> ((self.best_chain['height'] + 1) // self.spv.coin.BLOCK_REWARD_HALVING)
+
+    def __get_next_work(self, prev_block_link, next_block_link_timestamp):
         if ((prev_block_link['height'] + 1) % self.spv.coin.WORK_INTERVAL) != 0:
             # special retargetting rules for testnet
             if self.spv.testnet:
-                if block_link['header'].timestamp > (prev_block_link['header'].timestamp + (self.spv.coin.TARGET_BLOCK_SPACING * 2)):
+                if next_block_link_timestamp > (prev_block_link['header'].timestamp + (self.spv.coin.TARGET_BLOCK_SPACING * 2)):
                     return target_to_bits(Block.BLOCK_DIFFICULTY_LIMIT)
                 else:
                     # return the last block that did not fall under the special min-difficulty rule
